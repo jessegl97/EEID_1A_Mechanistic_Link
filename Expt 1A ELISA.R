@@ -44,7 +44,7 @@ m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
 m.ab$threshold_cutoff = 50
 m.ab$seropos_cutoff = 0.061
 
-
+m.ab$primary_treatment <- factor(m.ab$primary_treatment, levels = c("High", "Low", "Sham"))
 #generate infected column - if copy number > 50, infected.
 #for each timepoint only - can become infected or uninfected at next timepoint
 m.ab <- m.ab %>%
@@ -56,7 +56,7 @@ m.ab <- m.ab %>%
 #To be conservative, I am always assuming there is no path load unless it's measured with qPCR
 m.ab <- m.ab %>%
   group_by(band_number) %>%
-  mutate(ever_infected_qpcr = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  mutate(infected_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
   ungroup()
 
 #generate infection data; if path load > 50 copies any time after secondary infection -> 1
@@ -81,11 +81,11 @@ m.ab$tes <- m.ab$l_eye_score + m.ab$r_eye_score
 
 ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
   geom_jitter(height=0.1)+
-  facet_wrap(~ever_infected_qpcr)
+  facet_wrap(~infected_prim)
 
 #who has an eye score but no path load? 2451
 m.ab%>%
-  filter(dpi < 42 & ever_infected_qpcr == 0 & tes == 2.5)
+  filter(dpi < 42 & infected_prim == 0 & tes == 2.5)
 
 m.ab%>%
   filter(band_number == 2451)%>%
@@ -115,7 +115,7 @@ ggplot(m.ab, aes(x=primary_treatment, y=elisa_od, color=primary_treatment))+
 ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=elisa_od, color=primary_treatment))+
   geom_jitter()+
   geom_hline(yintercept=0.061)+
-  facet_wrap(~ever_infected_qpcr)
+  facet_wrap(~infected_prim)
 
 serop_neg <- m.ab %>%
   group_by(band_number)%>%
@@ -143,7 +143,7 @@ m.ab <- m.ab %>%
 
 #which birds are seropositive but qPCR negative?
 m.ab%>%
-  filter(ever_infected_qpcr == 0 & elisa_od > 0.061 & dpi < 42)%>%
+  filter(infected_prim == 0 & elisa_od > 0.061 & dpi < 42)%>%
   dplyr::select(band_number, dpi, tes, elisa_od, quantity, primary_treatment)
 
 #2398, 2451, 2470, 2515
@@ -190,6 +190,12 @@ ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
   facet_wrap(~primary_treatment)
 unique(m.ab$dpi)
 
+ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  geom_path(aes(group=as.factor(band_number)), alpha=0.5, size=0.5)+
+  facet_wrap(~primary_treatment)
+
 #####Side Quest: Low dose seroconversion + outcomes
 m.ab.low <- m.ab %>%
   filter(primary_treatment == "low")
@@ -216,23 +222,34 @@ simulateResiduals(glm.a, plot=T)
 
 #data frame with only primary infection (no PID 56)
 p.ab <- m.ab %>%
-  filter(dpi <=41 & elisa_od >0) #elisa_od > 0 to filter out samples that need to be re-run
+  filter(dpi <=41) #elisa_od > 0 to filter out samples that need to be re-run
 
 #are birds with higher elisa_od also the birds with higher elisa_cvs? Not really 
 ggplot(p.ab, aes(x=elisa_cv, y=elisa_od))+
   geom_point()+
   geom_hline(yintercept = 0.061)
-
+levels(p.ab$primary_treatment)
 #make comparisons to control in model output
-p.ab$primary_treatment <- factor(p.ab$primary_treatment, levels = c("sham", "low", "high"))
+p.ab$primary_treatment <- factor(p.ab$primary_treatment, levels = c("Sham", "Low", "High"))
 #gamma distribution because antibody data looks exponential
 #gamma distribution; band_number as random effect b/c longitudinal
 
 #confirm all elisa_ods were the same before infection
-lm0 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+lm0 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
 summary(lm0)
 plot(allEffects(lm0))
 #yes
+emm_results <- emmeans(lm0, ~ primary_treatment, scale="response")
+emm_results
+
+emm_results <- update(emm_results, scale="response")
+em_pairs <- pairs(emm_results)
+em_pairs
+
+lm0a <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+lm0b <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma(log))
+
+aictab(cand.set=list(lm0a, lm0b), modnames=c("lm0a","lm0b"))
 
 #Does primary treatment predict antibody levels across primary infection?
 #I use primary_treatment here (categorical) to look at differences between low and high dose
@@ -246,28 +263,26 @@ plot(allEffects(lm1)) #note inverse link function flips y axis
 
 
 #model comparison 
-p1 <- glm(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
-p2<- glm(elisa_od~primary_treatment + sex + (1|band_number), data=p.ab, family=Gamma())
-p3<- glm(elisa_od~primary_treatment * sex + (1|band_number), data=p.ab, family=Gamma())
-p4 <- glm(elisa_od~1, + (1|band_number), data=p.ab, family=Gamma())
-p5 <- glm(elisa_od~primary_treatment + mass + (1|band_number), data=p.ab, family=Gamma())
-p6<- glm(elisa_od~primary_dose + (1|band_number), data=p.ab, family=Gamma())
+p1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
+p2<- glmmTMB(elisa_od~primary_treatment + sex + (1|band_number), data=p.ab, family=Gamma())
+p3<- glmmTMB(elisa_od~primary_treatment * sex + (1|band_number), data=p.ab, family=Gamma())
+p4 <- glmmTMB(elisa_od~1 + (1|band_number), data=p.ab, family=Gamma())
+p5 <- glmmTMB(elisa_od~primary_treatment + mass + (1|band_number), data=p.ab, family=Gamma())
+
 
 #AICc
-aictab(cand.set=list(p1, p2, p3, p4, p5, p6), modnames=c("p1","p2", "p3", "p4", "p5", "p6"))
+aictab(cand.set=list(p1, p2, p3, p4, p5), modnames=c("p1","p2", "p3", "p4", "p5"))
+
+ps1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
+ps2 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma(log))
+
+aictab(cand.set=list(ps1, ps2), modnames=c("ps1","ps2"))
+#Inverse link function works better
 
 #p1 best model
-library(multcomp)
+emm_results <- emmeans(lm1, ~ primary_treatment, scale="response")
+pairs(emm_results)
 
-#hypothesis testing
-# Specify the contrast for the comparison
-contrast_matrix <- matrix(c(0, 1, -1), nrow = 1)
-
-# Perform the contrast using glht
-contrast_test <- glht(lm1, contrast_matrix)
-
-# Summarize the results
-summary(contrast_test)
 #high primary dose had significantly higher antibody levels than low primary dose (p < 0.0001)
 
 #antibodies across all days primary infection
@@ -287,10 +302,13 @@ ggplot(data=p.ab, aes(x=as.factor(primary_dose), y= elisa_od, shape=primary_trea
 ##### (1) Does inoculation dose predict antibody levels on day 14? ####
 
 #glm b/c only using one dpi so no need for bird_id as a fixed effect
-lm2 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
+lm2 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
 hist(p.ab$elisa_od)
 summary(lm2)
 
+emm_results <- emmeans(lm2, ~ primary_treatment, scale="response")
+emm_results
+pairs(emm_results)
 
 plot(allEffects(lm2))
 #Primary treatment predicts antibody levels on day 14/15
@@ -299,7 +317,9 @@ qqnorm(resid(lm2))
 qqline(resid(lm2))
 shapiro.test(resid(lm2))
 
-
+p.ab %>%
+  filter(dpi %in% c(-8, 14, 41) & is.na(elisa_od)) %>%
+  dplyr::select(band_number, bird_ID, dpi, elisa_od)
 #graph showing antibody levels on dpi 14/15 by primary_treatment
 ggplot(data=p.ab %>% filter(dpi== 14), aes(x=as.factor(primary_dose), y= elisa_od, shape=primary_treatment))+
   geom_jitter(width=0.1)+
@@ -308,22 +328,21 @@ ggplot(data=p.ab %>% filter(dpi== 14), aes(x=as.factor(primary_dose), y= elisa_o
   stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean,
                fun.min = function(x) mean(x)-sd(x),
                fun.max = function(x) mean(x)+sd(x),
-               geom= "errorbar", size=0.5, width=0.25)+
-  labs(title = "ELISA OD DPI 14", y="ELISA OD", x= "Primary Treatment", shape="Primary Treatment")
+               geom= "errorbar", size=0.25, width=0.25)+
+  labs(title = "Antibody Levels Day 14", y="ELISA OD", x= "Primary Treatment", shape="Primary Treatment")
 
 
 #model comparison
-pr1 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr2<- glm(elisa_od~primary_treatment + sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr2.5<- glm(elisa_od~primary_treatment * sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr3 <- glm(elisa_od~primary_treatment + room , data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr4 <- glm(elisa_od~primary_treatment * room , data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr5 <- glm(elisa_od~1, data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr6 <- glm(elisa_od~primary_treatment + mass, data=p.ab %>% filter(dpi == 14), family=Gamma())
-pr7<- glm(elisa_od~primary_dose, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr1 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr2<- glmmTMB(elisa_od~primary_treatment + sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr3<- glmmTMB(elisa_od~primary_treatment * sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr4 <- glmmTMB(elisa_od~primary_treatment * room , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr5 <- glmmTMB(elisa_od~1, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr6 <- glmmTMB(elisa_od~primary_treatment + mass, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr7 <- glmmTMB(elisa_od~primary_treatment + room , data=p.ab %>% filter(dpi == 14), family=Gamma())
 
 #AICc
-aictab(cand.set=list(pr1, pr2, pr2.5, pr3, pr4, pr5, pr6, pr7), modnames=c("pr1","pr2", "pr2.5", "pr3", "pr4", "pr5", "pr6", "pr7"))
+aictab(cand.set=list(pr1, pr2, pr3, pr4, pr5, pr6, pr7), modnames=c("pr1","pr2", "pr3", "pr4", "pr5", "pr6", "pr7"))
 
 #Model selection based on AICc:
 #       K    AICc Delta_AICc AICcWt Cum.Wt     LL
@@ -352,13 +371,13 @@ plot(allEffects(pr1))
 summary(pr2) #sex does not influence
 
 #Primary dose predicts antibody levels on day 14 post inoculation (n=127, Estimate = -11.74, SE=1.49)
-t1 <- m.ab%>%  filter(dpi == 14) %>%
+t1 <- m.ab%>%  filter(dpi == 14 & !is.na(elisa_od)) %>%
   group_by( primary_treatment)%>%
   summarize(count = n())
 t1
 primary_treatment_14_name_n = c(
-  'sham' = 'Sham (n= 51)',
-  'low' = 'Low (n= 51)',
+  'sham' = 'Sham (n= 37)',
+  'low' = 'Low (n= 50)',
   'high' = 'High (n=53)'
   )
 
@@ -369,11 +388,12 @@ head(dat.new)
 
 #plot predicted values over raw data
 pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y=elisa_od, shape=primary_treatment))+
-  geom_jitter(size=2, width=0.1)+
+  geom_jitter(size=2, width=0.25)+
   geom_point(data=dat.new, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown")+#model predictions
+  #stat_summary(aes(group=primary_treatment), fun=mean, geom="point", alpha=1, size=5, shape="-", color="black")+
   scale_shape_manual(values = c(16, 17, 15), labels = primary_treatment_14_name_n)+
-  labs(title="MG Antibodies DPI 14", x="Primary Treatment", y="ELISA OD", shape="Primary Treatment")+
-  scale_x_discrete(labels = primary_treatment_14_name_n)
+  geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
+  labs(title="MG Antibodies DPI 14", x="Primary Treatment", y="ELISA OD", shape="Primary Treatment")
 
 pid14.pred
 
@@ -830,7 +850,7 @@ ggplot(m.ab %>% filter(dpi == 56), aes(y=elisa_od, x=secondary_dose))+
     
 #make a dataframe with elisa_od from dpi 14 for every band_number and infection status from dpi 56 for every band_number
 m.ab1<-m.ab %>%
-  dplyr::select(dpi, quantity, elisa_od, band_number, infected, ever_infected_qpcr, 
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected, infected_prim, 
                 primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex) #make new df with just relevant variables
 
 #subset data for dpi 14 and 56
@@ -843,7 +863,7 @@ sub.ab$infection_56 <- ifelse(dpi == 56 & !is.na(infected) & infected == 1, 1, 0
   
 elisa14 <- m.ab1 %>%
   filter(dpi == 14)%>% #dpi 14 for elisa
-  dplyr:: select(elisa_od, band_number, dpi, infected, ever_infected_qpcr, primary_treatment,
+  dplyr:: select(elisa_od, band_number, dpi, infected, infected_prim, primary_treatment,
                  secondary_treatment, primary_dose, secondary_dose, sex) #df with only elisa od, band number, dpi from 14
 
 str(m.ab1)
