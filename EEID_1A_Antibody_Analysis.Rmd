@@ -8,7 +8,8 @@ output:
 ---
 
 Heyo here we go: Load packages
-```{r}
+```{r Load Packages}
+rm(list=ls())
 library(tidyverse)
 library(dplyr)
 #install.packages("glmmTMB")
@@ -17,8 +18,127 @@ library(effects)
 library(AICcmodavg)
 ```
 
-```{r}
+```{r Read In Data + Merge}
 master <- read.csv("EEID2021_master_data_20220503.csv")
 ab <- read.csv("EEID_1a_ELISA.csv")
 m.ab <- left_join(master, ab, by = "bird_ID", keep=TRUE)
 ```
+Format Data
+```{r Format}
+m.ab[m.ab == "f "] <- "f"
+
+m.ab <- m.ab %>%
+  dplyr::select(- date.y, -bird_ID.y, -band_number.y, -dpi, -(X:X.13)) #remove extra columns
+
+#rename columns
+names(m.ab)[names(m.ab) == "date.x"] <- "date"
+names(m.ab)[names(m.ab) == "band_number.x"] <- "band_number"
+names(m.ab)[names(m.ab) == "bird_ID.x"] <- "bird_ID"
+names(m.ab)[names(m.ab) == "Avg.OD"] <- "elisa_od"
+names(m.ab)[names(m.ab) == "CV"] <- "elisa_cv"
+names(m.ab)[names(m.ab) == "dppi"] <- "dpi"
+
+m.ab$primary_treatment <- as.factor(m.ab$primary_treatment)
+levels(m.ab$primary_treatment) <- c("High", "Low", "Sham")
+m.ab$l_eye_score <- as.numeric(m.ab$l_eye_score)
+m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
+
+```
+Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
+```{r Thresholds}
+m.ab$threshold_cutoff = 50
+m.ab$seropos_cutoff = 0.061
+```
+Generate new infected and seroconversion columns based off of cutoffs
+```{r Infection + Seroconversion}
+#generate infected column - if copy number > 50, infected.
+#for each timepoint only - can become infected or uninfected at next timepoint
+m.ab <- m.ab %>%
+  mutate(infected = ifelse(quantity>threshold_cutoff, 1, 0))
+
+#generate infection data; if path load > 50 copies = infected
+#1 = bird was successfully infected at any point during the priming phase of the experiment
+#coalesce function replaces any NA with 0 here. 
+#To be conservative, I am always assuming there is no path load unless it's measured with qPCR
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(infected_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate infection data; if path load > 50 copies any time after secondary infection -> 1
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate (infected_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate seropositivity data; if elisa OD > 0.061 = seropositive
+#1 = bird seroconverted at any point during the priming phase of the experiment
+m.ab <- m.ab %>%
+  mutate(seropos = ifelse(elisa_od>seropos_cutoff, 1, 0))
+
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(ever_seropos = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+```
+
+```{r Eye Score Formatting}
+#total eye score = sum of l and r eye score
+m.ab$tes <- m.ab$l_eye_score + m.ab$r_eye_score
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
+  geom_jitter(height=0.1)+
+  facet_wrap(~infected_prim)
+#2415 has eye score but no path load - super resistant?
+```
+```{r Omit 2505}
+#check for seropositive birds from quarantine from dataset
+m.ab %>%
+  filter(dpi == -8) %>%
+  filter(elisa_od >= 0.061)%>%
+  dplyr::select(band_number, elisa_od, primary_treatment, secondary_treatment, infected, seropos, dpi, ELISA.Run.Date)
+
+#omit 2505 from data set for analysis as it was positive at quarantine
+m.ab <- m.ab %>%
+  filter(band_number != 2505)
+
+#which birds are seropositive but qPCR negative?
+m.ab%>%
+  filter(infected_prim == 0 & elisa_od > 0.061 & dpi < 42)%>%
+  dplyr::select(band_number, dpi, tes, elisa_od, quantity, primary_treatment)
+```
+
+```{r Format DPI}
+#some sample days were split between two days. 
+#One day experimental birds were measured (dpi -8 and dpi 14), the next day infected birds were measured (dpi -7, dpi15)
+#this code makes a new column dpi.new that combines dpi 14 and 15
+m.ab$dpi.new <- ifelse(m.ab$dpi %in% c(14, 15), "14", as.integer(m.ab$dpi))
+
+#i then use dpi.new to replace the dpi column to combine dpi -7 and -8
+m.ab$dpi <- ifelse(m.ab$dpi %in% c(-7, -8), "-8", as.integer(m.ab$dpi.new))
+
+m.ab$dpi.new <- NULL #delete dpi.new column
+
+m.ab$dpi <- as.numeric(m.ab$dpi)
+
+m.ab <- m.ab %>%
+  filter(experiment_location == "vt") #include only birds at VT
+```
+General overview of antibody responses
+```{r, warning=FALSE}
+
+ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  geom_smooth(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5)+
+  #scale_color_manual(values = c("red", "green4","blue"))+
+  labs(x="Days Post Infection", y="ELISA OD", color="Primary Treatment")+
+  facet_wrap(~fct_rev(primary_treatment))
+```
+####Does Inoculation Dose Predict Antibody Levels?####
+```{r New df p.ab for primary }
+#data frame with only primary infection (no PID 56)
+p.ab <- m.ab %>%
+  filter(dpi <=41)
+```
+
