@@ -7,33 +7,55 @@ output:
     keep_md: yes
 ---
 
+Heyo here we go: Load packages
 
+```r
+library(tidyverse)
+```
 
-## R Markdown
+```
+## ── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+## ✔ dplyr     1.1.2     ✔ readr     2.1.4
+## ✔ forcats   1.0.0     ✔ stringr   1.5.0
+## ✔ ggplot2   3.4.3     ✔ tibble    3.2.1
+## ✔ lubridate 1.9.2     ✔ tidyr     1.3.0
+## ✔ purrr     1.0.2     
+## ── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+## ✖ dplyr::filter() masks stats::filter()
+## ✖ dplyr::lag()    masks stats::lag()
+## ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
+```
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```r
+library(dplyr)
+#install.packages("glmmTMB")
+library(glmmTMB)
+```
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```
+## Warning in checkMatrixPackageVersion(): Package version inconsistency detected.
+## TMB was built with Matrix version 1.6.0
+## Current Matrix version is 1.5.4.1
+## Please re-install 'TMB' from source using install.packages('TMB', type = 'source') or ask CRAN for a binary version of 'TMB' matching CRAN's 'Matrix' package
+```
+
+```r
+library(effects)
+```
+
+```
+## Loading required package: carData
+## lattice theme set by effectsTheme()
+## See ?effectsTheme for details.
+```
+
+```r
+library(AICcmodavg)
+```
 
 
 ```r
-summary(cars)
+master <- read.csv("EEID2021_master_data_20220503.csv")
+ab <- read.csv("EEID_1a_ELISA.csv")
+m.ab <- left_join(master, ab, by = "bird_ID", keep=TRUE)
 ```
-
-```
-##      speed           dist       
-##  Min.   : 4.0   Min.   :  2.00  
-##  1st Qu.:12.0   1st Qu.: 26.00  
-##  Median :15.0   Median : 36.00  
-##  Mean   :15.4   Mean   : 42.98  
-##  3rd Qu.:19.0   3rd Qu.: 56.00  
-##  Max.   :25.0   Max.   :120.00
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-![](EEID_1A_Antibody_Analysis_files/figure-html/pressure-1.png)<!-- -->
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
