@@ -7,7 +7,16 @@ output:
     keep_md: yes
 ---
 
-Heyo here we go
+Heyo here we go: Load packages
+```{r}
+library(tidyverse)
+library(dplyr)
+#install.packages("glmmTMB")
+library(glmmTMB)
+library(effects)
+library(AICcmodavg)
+```
+
 ```{r}
 master <- read.csv("EEID2021_master_data_20220503.csv")
 ab <- read.csv("EEID_1a_ELISA.csv")
