@@ -16,6 +16,8 @@ library(dplyr)
 library(glmmTMB)
 library(effects)
 library(AICcmodavg)
+#install.packages("emmeans")
+library(emmeans)
 ```
 
 ```{r Read In Data + Merge}
@@ -40,6 +42,7 @@ names(m.ab)[names(m.ab) == "dppi"] <- "dpi"
 
 m.ab$primary_treatment <- as.factor(m.ab$primary_treatment)
 levels(m.ab$primary_treatment) <- c("High", "Low", "Sham")
+m.ab$primary_treatment <- factor(m.ab$primary_treatment, levels = c("Sham", "Low", "High"))
 m.ab$l_eye_score <- as.numeric(m.ab$l_eye_score)
 m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
 
@@ -127,13 +130,13 @@ m.ab <- m.ab %>%
 General overview of antibody responses
 ```{r, warning=FALSE}
 
-ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
+ggplot(m.ab, aes(x=dpi, y=elisa_od, color=fct_rev(primary_treatment)))+
   geom_point()+
   geom_hline(yintercept = 0.061)+
   geom_smooth(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5)+
   #scale_color_manual(values = c("red", "green4","blue"))+
   labs(x="Days Post Infection", y="ELISA OD", color="Primary Treatment")+
-  facet_wrap(~fct_rev(primary_treatment))
+  facet_wrap(~primary_treatment)
 ```
 ####Does Inoculation Dose Predict Antibody Levels?####
 ```{r New df p.ab for primary }
@@ -141,4 +144,98 @@ ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
 p.ab <- m.ab %>%
   filter(dpi <=41)
 ```
+
+I use a gamma distribution for the antibody data
+With models spanning multiple days, band_number is included as a random effect
+
+Do I use a log link function or inverse link function? Compare AIC and logLik
+Skipping ahead here with models, but showing that *inverse link works better*
+```{r Inverse vs Log Link}
+#pre-infection
+lm0a <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+lm0b <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma(log))
+
+aictab(cand.set=list(lm0a, lm0b), modnames=c("inv","log"))
+#no difference between the two
+
+#Across all infection
+ps1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
+ps2 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma(log))
+
+aictab(cand.set=list(ps1, ps2), modnames=c("inv","log"))
+#inverse link function is slightly better
+
+#DPI 14
+p1a <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==14), family=Gamma())
+p2a <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==14), family=Gamma(log))
+
+aictab(cand.set=list(p1a, p2a), modnames=c("inv","log"))
+#no difference 
+
+#DPI 41
+p1b <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==41), family=Gamma())
+p2b <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==41), family=Gamma(log))
+
+aictab(cand.set=list(p1b, p2b), modnames=c("inv","log"))
+#no difference
+```
+
+Baseline antibody levels were not significantly different from each other before inoculation.
+emmeans shows estimated marginal means for variables and allows for post-hoc pairwise comparisons using the Tukey-Kramer method to minimize type 1 error.
+```{r Baseline antibody levels were not significantly different}
+lm0 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+summary(lm0)
+plot(allEffects(lm0))
+
+emm_r <- emmeans(lm0, ~primary_treatment)
+pairs(emm_r)
+
+```
+Using primary_treatment (categorical), I show that birds inoculated with MG produce antibodies in a dose-dependent manner.
+```{r Antibody levels on day 14 post infection were sig different between groups}
+#Final Model
+lm2 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
+summary(lm2)
+
+emm_results <- emmeans(lm2, ~ primary_treatment, scale="response")
+emm_results
+pairs(emm_results)
+
+plot(allEffects(lm2))
+
+#model comparison
+pr1 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr2<- glmmTMB(elisa_od~primary_treatment + sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr3<- glmmTMB(elisa_od~primary_treatment * sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr4 <- glmmTMB(elisa_od~primary_treatment * room , data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr5 <- glmmTMB(elisa_od~1, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr6 <- glmmTMB(elisa_od~primary_treatment + mass, data=p.ab %>% filter(dpi == 14), family=Gamma())
+pr7 <- glmmTMB(elisa_od~primary_treatment + room , data=p.ab %>% filter(dpi == 14), family=Gamma())
+
+#AICc
+aictab(cand.set=list(pr1, pr2, pr3, pr4, pr5, pr6, pr7), modnames=c("pr1","pr2", "pr3", "pr4", "pr5", "pr6", "pr7"))
+
+
+#There were 15 blood samples that were lost before they were run and are not included in this graph
+missing_samples <- p.ab %>%
+  filter(dpi %in% c(-8, 14, 41) & is.na(elisa_od)) %>%
+  dplyr::select(band_number, bird_ID, dpi, elisa_od)
+print(missing_samples)
+
+#graph showing antibody levels on day 14 post-infection with model predictions
+pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y=elisa_od, shape=primary_treatment))+
+  geom_jitter(size=2, width=0.25)+
+  geom_point(data=dat.new, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown")+#model predictions
+  scale_shape_manual(values = c(16, 17, 15), labels = primary_treatment_14_name_n)+
+  geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
+  labs(title="MG Antibodies Day 14", x="Primary Treatment", y="Antibody Levels", shape="Primary Treatment")
+
+pid14.pred
+
+```
+This effect is 
+```{r Antibody levels on day 41 post infection were sig different between groups}
+
+```
+
 
