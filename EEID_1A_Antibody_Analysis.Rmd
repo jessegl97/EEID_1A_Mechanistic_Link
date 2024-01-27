@@ -222,18 +222,67 @@ missing_samples <- p.ab %>%
   dplyr::select(band_number, bird_ID, dpi, elisa_od)
 print(missing_samples)
 
+#Model predictions
+dat.new=expand.grid(primary_treatment=unique(p.ab$primary_treatment))#new grid to put predictions into
+dat.new$yhat = predict(lm2, type="response", newdata=dat.new, re.form=NA) #predicted values based off lm2 model
+head(dat.new)
+
 #graph showing antibody levels on day 14 post-infection with model predictions
 pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y=elisa_od, shape=primary_treatment))+
   geom_jitter(size=2, width=0.25)+
   geom_point(data=dat.new, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown")+#model predictions
-  scale_shape_manual(values = c(16, 17, 15), labels = primary_treatment_14_name_n)+
+  scale_shape_manual(values = c(16, 17, 15))+
   geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
   labs(title="MG Antibodies Day 14", x="Primary Treatment", y="Antibody Levels", shape="Primary Treatment")
 
 pid14.pred
 
 ```
-This effect is 
+I also looked at primary_dose, a continuous variable to test whether inoculation dose affects antibody response.
+
+```{r Primary Dose Continuous Day 14}
+#model comparison
+prd1 <- glm(elisa_od~primary_dose, data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd2<- glm(elisa_od~primary_dose + sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd2.5<- glm(elisa_od~primary_dose * sex , data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd3 <- glm(elisa_od~primary_dose + room , data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd4 <- glm(elisa_od~primary_dose * room , data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd5 <- glm(elisa_od~1, data=p.ab %>% filter(dpi == 14), family=Gamma())
+prd6 <- glm(elisa_od~primary_dose + mass, data=p.ab %>% filter(dpi == 14), family=Gamma())
+
+#AICc
+aictab(cand.set=list(prd1, prd2, prd2.5, prd3, prd4, prd5, prd6), modnames=c("prd1", "prd2", "prd2.5", "prd3", "prd4", "prd5", "prd6"))
+
+summary(prd1)
+
+#continuous model predictions
+dat.new2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$primary_dose), length.out = 10))
+dat.new2$yhat <- predict(prd1, type = "response", interval = "confidence", level = 0.95, newdata = dat.new2)
+
+#plot continuous predicted values over raw data
+pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od))+
+  geom_jitter(size=2, width=0.5, shape = 1)+
+  geom_line(data=dat.new2, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
+  labs(x="Primary Dose", y="Antibody Levels", shape="Primary Dose")
+
+pid14.dose.pred.c
+```
+Alternatively, I can subset the primary_dose into facors based on primary_dose. This maintains the continuous nature of the data, but allows for pairwise comparisons using emmeans.
+```{r}
+# Create a new factor variable based on primary_dose
+p.ab <- p.ab %>% mutate(primary_dose_group = cut(primary_dose, breaks = c(-Inf, 100, 2000, Inf), labels = c("Sham", "Low", "High")))
+
+# Fit your GLM model including the new factor variable
+prdc1 <- glm(elisa_od ~ primary_dose_group, data = p.ab %>% filter(dpi == 14), family = Gamma())
+
+# Calculate estimated marginal means (EMMs)
+emm_results <- emmeans(prdc1, specs = "primary_dose_group")
+
+# Conduct pairwise comparisons between the groups
+pairs(emm_results)
+
+```
+
 ```{r Antibody levels on day 41 post infection were sig different between groups}
 
 ```

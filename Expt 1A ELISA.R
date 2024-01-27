@@ -425,6 +425,21 @@ aictab(cand.set=list(prd1, prd2, prd2.5, prd3, prd4, prd5, prd6), modnames=c("pr
 #prd1 best model
 summary(prd1)
 plot(allEffects(prd1))
+emm_results <- emmeans(prd1, ~ primary_dose)
+emm_results
+
+# Create a new factor variable based on primary_dose
+p.ab <- p.ab %>% mutate(primary_dose_group = cut(primary_dose, breaks = c(-Inf, 500, 2000, Inf), labels = c("Sham", "Low", "High")))
+
+# Fit your GLM model including the new factor variable
+prdc1 <- glm(elisa_od ~ primary_dose_group, data = p.ab %>% filter(dpi == 14), family = Gamma())
+
+# Calculate estimated marginal means (EMMs)
+emm_results <- emmeans(prdc1, specs = "primary_dose_group")
+
+# Conduct pairwise comparisons between the groups
+pairwise_contrasts <- pairs(emm_results)
+pairwise_contrasts
 
 #Coefficients:
 #                 Estimate Std. Error t value Pr(>|t|)    
@@ -445,6 +460,15 @@ dat.new2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$prima
 dat.new2$yhat <- predict(prd1, type = "response", interval = "confidence", level = 0.95, newdata = dat.new2)
 head(dat.new2)
 
+#continuous factor
+dat.new3 <- data.frame(primary_dose_group = c("Sham", "Low", "High"))
+
+# Add the original continuous predictor variable
+dat.new3$primary_dose <- c(0, 750, 3000)
+# Make predictions
+dat.new3$yhat <- predict(prdc1, newdata = dat.new3, type = "response")
+head(dat.new3)
+
 #plot predicted values over raw data
 pid14.dose.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=as.factor(primary_dose), y=elisa_od, shape=as.factor(primary_dose)))+
   geom_jitter(size=2, width=0.1)+
@@ -455,11 +479,12 @@ pid14.dose.pred
 
 #plot continuous predicted values over raw data
 pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od))+
-  geom_jitter(size=2, width=0.1)+
+  geom_jitter(size=1, width=5, shape=1)+
   geom_line(data=dat.new2, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
   labs(x="Primary Dose", y="ELISA OD", shape="Primary Dose")
 
 pid14.dose.pred.c
+
 
 ##### (2) Does inoculation dose predict antibody levels on day 41?####
 #gamma distribution because antibody data looks exponential
