@@ -268,11 +268,11 @@ pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose,
 pid14.dose.pred.c
 ```
 Alternatively, I can subset the primary_dose into facors based on primary_dose. This maintains the continuous nature of the data, but allows for pairwise comparisons using emmeans.
-```{r}
+```{r Primary Dose continuous pairwise comparisons day 14}
 # Create a new factor variable based on primary_dose
 p.ab <- p.ab %>% mutate(primary_dose_group = cut(primary_dose, breaks = c(-Inf, 100, 2000, Inf), labels = c("Sham", "Low", "High")))
 
-# Fit your GLM model including the new factor variable
+# Fit glm with  new factor variable
 prdc1 <- glm(elisa_od ~ primary_dose_group, data = p.ab %>% filter(dpi == 14), family = Gamma())
 
 # Calculate estimated marginal means (EMMs)
@@ -282,9 +282,90 @@ emm_results <- emmeans(prdc1, specs = "primary_dose_group")
 pairs(emm_results)
 
 ```
-
+Antibody levels return to baseline in the low (p = 0.149), but not high dose (p < 0.001) groups by day 41.
 ```{r Antibody levels on day 41 post infection were sig different between groups}
+lm3 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi==41), family=Gamma())
+summary(lm3)
 
+emm_results<- emmeans(lm3, ~ primary_treatment)
+pairs(emm_results)
+
+#model comparison
+p1 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi==41), family=Gamma())
+p2<- glm(elisa_od~primary_treatment + sex , data=p.ab %>% filter(dpi==41), family=Gamma())
+p3<- glm(elisa_od~primary_treatment * sex , data=p.ab %>% filter(dpi==41), family=Gamma())
+p4 <- glm(elisa_od~primary_treatment + quantity , data=p.ab %>% filter(dpi==41), family=Gamma())
+p5 <- glm(elisa_od~1, data=p.ab %>% filter(dpi==41), family=Gamma())
+p6 <- glm(elisa_od~primary_treatment + mass, data= p.ab %>% filter(dpi==41), family=Gamma())
+
+#AICc
+aictab(cand.set=list(p1, p2, p3, p4, p5, p6), modnames=c("p1", "p2", "p3", "p4", "p5", "p6"))
+
+summary(p2)
+#p2 is the best model
+#but sex adds complexity and is not significant (0.1445) so remove
+
+#p1 is second best - use
+summary(p1)
+
+#model predictions
+dat.newer=expand.grid(primary_treatment=unique(p.ab$primary_treatment))#new grid to put predictions into
+dat.newer$yhat = predict(lm3, type="response", newdata=dat.newer, re.form=NA) #predicted values based off lm3  model
+head(dat.newer)
+
+#plot predicted values over raw data
+pid41.pred <- ggplot(data = m.ab %>% filter(dpi == 41), aes(x = primary_treatment, y = elisa_od, shape = primary_treatment)) +
+  geom_jitter(size=1.5, width = 0.25) +
+  geom_hline(yintercept = 0.061, color = "black", alpha = 0.75, linetype='dashed') +
+  labs(x="Inoculation Dose", y= "MG Antibodies OD", shape = "Primary Treatment")+
+  geom_point(data=dat.newer, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown4")#model predictions
+
+pid41.pred
 ```
 
+Antibody levels return to baseline in the low (p = 0.149), but not high dose (p < 0.001) groups by day 41.
+```{r Primary Dose Continuous Day 41}
+#model comparison
+pr1 <- glm(elisa_od~primary_dose, data=p.ab %>% filter(dpi==41), family=Gamma())
+pr2<- glm(elisa_od~primary_dose + sex , data=p.ab %>% filter(dpi==41), family=Gamma())
+pr3<- glm(elisa_od~primary_dose * sex , data=p.ab %>% filter(dpi==41), family=Gamma())
+pr4 <- glm(elisa_od~primary_dose + quantity , data=p.ab %>% filter(dpi==41), family=Gamma())
+pr5 <- glm(elisa_od~1, data=p.ab %>% filter(dpi==41), family=Gamma())
+pr6 <- glm(elisa_od~primary_dose + mass, data= p.ab %>% filter(dpi==41), family=Gamma())
+
+
+#AICc
+aictab(cand.set=list(pr1, pr2, pr3, pr4, pr5, pr6), modnames=c("pr1", "pr2", "pr3", "pr4", "pr5", "pr6"))
+
+#pr2 best model
+#but sex adds complexity and is not significant (0.146) so remove
+
+summary(pr1)
+
+#continuous model predictions
+dat.newer2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$primary_dose), length.out = 100))
+dat.newer2$yhat <- predict(pr1, type = "response", interval = "confidence", level = 0.95, newdata = dat.newer2)
+head(dat.newer2)
+
+pid41.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 41), aes(x=primary_dose, y=elisa_od))+
+  geom_jitter(size=2, width=0.1)+
+  geom_line(data=dat.newer2, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
+  labs(title = "ELISA OD PID 41", x="Primary Dose", y="ELISA OD", shape="Primary Dose")+
+  geom_hline(yintercept = 0.061, color = "black", alpha = 0.75, linetype='dashed')
+
+pid41.dose.pred.c
+
+#pairwise comparisons
+p.ab <- p.ab %>% mutate(primary_dose_group = cut(primary_dose, breaks = c(-Inf, 100, 2000, Inf), labels = c("Sham", "Low", "High")))
+
+# Fit glm with  new factor variable
+pr1 <- glm(elisa_od~primary_dose_group, data=p.ab %>% filter(dpi==41), family=Gamma())
+
+# Calculate estimated marginal means (EMMs)
+emm_results <- emmeans(pr1, specs = "primary_dose_group")
+
+# Conduct pairwise comparisons between the groups
+pairs(emm_results)
+
+```
 

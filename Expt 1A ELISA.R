@@ -460,6 +460,15 @@ dat.new2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$prima
 dat.new2$yhat <- predict(prd1, type = "response", interval = "confidence", level = 0.95, newdata = dat.new2)
 head(dat.new2)
 
+#try to add SE
+dat.new2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$primary_dose), length.out = 100))
+predictions <- predict(prd1, type = "response", interval = "confidence", level = 0.95, newdata = dat.new2)
+predictions
+
+# Add predictions and standard errors to dat.new2
+dat.new2$yhat <- predictions[, "fit"]
+dat.new2$SE <- predictions[, "se"]
+
 #continuous factor
 dat.new3 <- data.frame(primary_dose_group = c("Sham", "Low", "High"))
 
@@ -481,10 +490,18 @@ pid14.dose.pred
 pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od))+
   geom_jitter(size=1, width=5, shape=1)+
   geom_line(data=dat.new2, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
+  geom_ribbon(data = dat.new2, aes(x = primary_dose, ymin = yhat - SE, ymax = yhat + SE), fill = "grey", alpha = 0.2) + # Confidence interval
   labs(x="Primary Dose", y="ELISA OD", shape="Primary Dose")
 
 pid14.dose.pred.c
 
+#plot continuous factor predicted values over raw data
+pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od))+
+  geom_jitter(size=1, width=5, shape=1)+
+  geom_line(data=dat.new3, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
+  labs(x="Primary Dose", y="ELISA OD", shape="Primary Dose")
+
+pid14.dose.pred.c
 
 ##### (2) Does inoculation dose predict antibody levels on day 41?####
 #gamma distribution because antibody data looks exponential
@@ -625,7 +642,7 @@ pid41.pred <- ggplot(data = m.ab %>% filter(dpi == 41), aes(x = fct_rev(primary_
 
 pid41.pred
 
-#graph showing antibody levels on dpi 14/15 by primary_treatment with mean, error, and model predictions
+#graph showing antibody levels on dpi 41 by primary_treatment with mean, error, and model predictions
 ggplot(data=p.ab %>% filter(dpi== 41), aes(x=as.factor(primary_treatment), y= elisa_od, shape=primary_treatment))+
   geom_jitter(width=0.1)+
   geom_hline(yintercept = 0.061, linetype="dashed")+
@@ -679,6 +696,15 @@ summary(pr1)
 # (Intercept)  21.5563342  0.3982652   54.13  < 2e-16 ***
 #  primary_dose -0.0001411  0.0000198   -7.13 3.88e-11 ***
 
+#continuous factor
+dat.new <- data.frame(primary_dose_group = c("Sham", "Low", "High"))
+
+# Add the original continuous predictor variable
+dat.new$primary_dose <- c(0, 750, 3000)
+# Make predictions
+dat.new$yhat <- predict(pr1, newdata = dat.new, type = "response")
+head(dat.new)
+
 #Primary dose predicts antibody levels on day 41 post inoculation (n=153, Estimate = 21.56, SE = 0.398)
 #####model predictions: primary_dose####
 dat.new=expand.grid(primary_dose=unique(p.ab$primary_dose),
@@ -687,7 +713,7 @@ dat.new$yhat = predict(pr2, type="response", newdata=dat.new, re.form=NA) #predi
 head(dat.new)
 
 #plot predicted values over raw data
-pid41.dose.sex.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=as.factor(primary_dose), y=elisa_od, shape=as.factor(primary_dose)))+
+pid41.dose.sex.pred <- ggplot(data=p.ab %>% filter(dpi == 41), aes(x=as.factor(primary_dose), y=elisa_od, shape=as.factor(primary_dose)))+
   geom_jitter(size=2, width=0.1)+
   geom_point(data=dat.new, aes(x=as.factor(primary_dose), y=yhat, shape=primary_dose), size=10, shape="-", color="brown")+#model predictions
   labs(x="Primary Dose", y="ELISA OD", shape="Primary Dose")+
@@ -725,7 +751,7 @@ pid41.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose,
 pid41.dose.pred.c
 
 #plot predicted values over raw data
-pid41.dose.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=as.factor(primary_dose), y=elisa_od, shape=as.factor(primary_dose)))+
+pid41.dose.pred <- ggplot(data=p.ab %>% filter(dpi == 41), aes(x=primary_dose, y=elisa_od, shape=as.factor(primary_dose)))+
   geom_jitter(size=2, width=0.1)+
   geom_point(data=dat.new, aes(x=as.factor(primary_dose), y=yhat, shape=primary_dose), size=10, shape="-", color="brown")+#model predictions
   geom_hline(yintercept = 0.061, color = "black", alpha = 0.75, linetype='dashed') +
