@@ -16,7 +16,6 @@ library(effects)
 library(AICcmodavg)
 
 #read in data
-ab_old <- read.csv("expt1a_elisa_raw.csv")
 master <- read.csv("EEID2021_master_data_20220503.csv")
 ab <- read.csv("EEID_1a_ELISA.csv")
 #merge
@@ -234,6 +233,39 @@ p.ab$primary_treatment <- factor(p.ab$primary_treatment, levels = c("Sham", "Low
 #gamma distribution because antibody data looks exponential
 #gamma distribution; band_number as random effect b/c longitudinal
 
+
+####Sex Differences####
+ggplot(m.ab %>% filter(dpi < 42), na.rm=T, aes(x=dpi, y=elisa_od, color = fct_rev(primary_treatment)))+
+  geom_jitter(alpha=0.25)+
+  stat_summary(aes(x=dpi, y=elisa_od, group = primary_treatment), geom="point", shape = "-", size=10, alpha=1)+
+  facet_grid(~sex)
+
+#fraction that got infected during primary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment) %>%
+  mutate(prim_prop = sum(infected_prim)/n())
+
+#by sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, sex) %>%
+  mutate(prim_prop_sex = sum(infected_prim)/n())
+
+#by dpi
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi) %>%
+  mutate(prim_prop_dpi = sum(infected_prim)/n())
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop, color=primary_treatment))+
+  geom_point()
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_sex, color=primary_treatment))+
+  geom_point()+
+  facet_wrap(~sex)
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_dpi, color=primary_treatment))+
+  geom_point()+
+  facet_wrap(~dpi)
+
 #confirm all elisa_ods were the same before infection
 lm0 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
 summary(lm0)
@@ -286,16 +318,18 @@ pairs(emm_results)
 #high primary dose had significantly higher antibody levels than low primary dose (p < 0.0001)
 
 #antibodies across all days primary infection
-ggplot(data=p.ab, aes(x=as.factor(primary_dose), y= elisa_od, shape=primary_treatment))+
-  geom_jitter(width=0.1)+
+ggplot(data=p.ab, aes(x=dpi, y= elisa_od, shape=primary_treatment,
+                      color=fct_rev(primary_treatment)))+
+  geom_jitter(width=5, size=1.5)+
+  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)))+
   geom_hline(yintercept = 0.061, linetype="dashed")+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="point", alpha=1, size=10, shape="-", color=
-                 "red")+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line")+
   stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean,
                fun.min = function(x) mean(x)-sd(x),
                fun.max = function(x) mean(x)+sd(x),
-               geom= "errorbar", size=0.5, width=0.25)+
-  labs(title = "ELISA OD Primary Infection", y="ELISA OD", x= "Primary Treatment", shape="Primary Treatment")
+               geom= "errorbar", size=.75, width=2)+
+  labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
+       x= "Primary Treatment", shape="Primary Treatment", color="Primary Treatment")
 
 
 

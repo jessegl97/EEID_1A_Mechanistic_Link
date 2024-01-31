@@ -1,0 +1,382 @@
+---
+title: "Sex Differences"
+author: "Jesse Garrett-Larsen"
+date: "2024-01-31"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+Load packages
+```{r Load Packages}
+rm(list=ls())
+library(tidyverse)
+library(dplyr)
+#install.packages("glmmTMB")
+library(glmmTMB)
+library(effects)
+library(AICcmodavg)
+#install.packages("emmeans")
+library(emmeans)
+library(DHARMa)
+```
+
+```{r Read In Data + Merge}
+master <- read.csv("EEID2021_master_data_20220503.csv")
+ab <- read.csv("EEID_1a_ELISA.csv")
+m.ab <- left_join(master, ab, by = "bird_ID", keep=TRUE)
+```
+Format Data
+```{r Format}
+m.ab[m.ab == "f "] <- "f"
+
+m.ab <- m.ab %>%
+  dplyr::select(- date.y, -bird_ID.y, -band_number.y, -dpi, -(X:X.13)) #remove extra columns
+
+#rename columns
+names(m.ab)[names(m.ab) == "date.x"] <- "date"
+names(m.ab)[names(m.ab) == "band_number.x"] <- "band_number"
+names(m.ab)[names(m.ab) == "bird_ID.x"] <- "bird_ID"
+names(m.ab)[names(m.ab) == "Avg.OD"] <- "elisa_od"
+names(m.ab)[names(m.ab) == "CV"] <- "elisa_cv"
+names(m.ab)[names(m.ab) == "dppi"] <- "dpi"
+
+
+m.ab$sex <- as.factor(m.ab$sex)
+m.ab$sex <- factor(m.ab$sex, levels = c("f", "m"), labels = c("Female", "Male"))
+m.ab$primary_treatment <- as.factor(m.ab$primary_treatment)
+levels(m.ab$primary_treatment) <- c("High", "Low", "Sham")
+m.ab$primary_treatment <- factor(m.ab$primary_treatment, levels = c("Sham", "Low", "High"))
+m.ab$l_eye_score <- as.numeric(m.ab$l_eye_score)
+m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
+#total eye score = sum of l and r eye score
+m.ab$tes <- m.ab$l_eye_score + m.ab$r_eye_score
+
+```
+Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
+```{r Thresholds}
+m.ab$threshold_cutoff = 15
+m.ab$seropos_cutoff = 0.061
+m.ab$pathology_cutoff = 0
+```
+Generate new infected and seroconversion columns based off of cutoffs
+```{r Infection + Seroconversion + Eye Score}
+#generate infected column - if copy number > 50, infected.
+#for each timepoint only - can become infected or uninfected at next timepoint
+m.ab <- m.ab %>%
+  mutate(infected = ifelse(quantity>threshold_cutoff, 1, 0))
+
+#generate infection data; if path load > 50 copies = infected
+#1 = bird was successfully infected at any point during the priming phase of the experiment
+#coalesce function replaces any NA with 0 here. 
+#To be conservative, I am always assuming there is no path load unless it's measured with qPCR
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(infected_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate infection data; if path load > 50 copies any time after secondary infection -> 1
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate (infected_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate seropositivity data; if elisa OD > 0.061 = seropositive
+#1 = bird seroconverted at any point during the priming phase of the experiment
+m.ab <- m.ab %>%
+  mutate(seropos = ifelse(elisa_od>seropos_cutoff, 1, 0))
+
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(ever_seropos = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate eye score data; if eye score > 0 = diseased
+#1 = bird had an eye score at that time point
+m.ab <- m.ab %>%
+  mutate(diseased = ifelse(tes>pathology_cutoff, 1, 0))
+
+#ever diseased during primary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(ever_diseased = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+```
+
+```{r Eye Score Formatting}
+ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
+  geom_jitter(height=0.1)+
+  facet_wrap(~infected_prim)
+#2415 has eye score but no path load - super resistant?
+```
+```{r Omit 2505}
+#check for seropositive birds from quarantine from dataset
+m.ab %>%
+  filter(dpi == -8) %>%
+  filter(elisa_od >= 0.061)%>%
+  dplyr::select(band_number, elisa_od, primary_treatment, secondary_treatment, infected, seropos, dpi, ELISA.Run.Date)
+
+#omit 2505 from data set for analysis as it was positive at quarantine
+m.ab <- m.ab %>%
+  filter(band_number != 2505)
+
+#which birds are seropositive but qPCR negative?
+m.ab%>%
+  filter(infected_prim == 0 & elisa_od > 0.061 & dpi < 42)%>%
+  dplyr::select(band_number, dpi, tes, elisa_od, quantity, primary_treatment)
+```
+
+```{r Format DPI}
+#some sample days were split between two days. 
+#One day experimental birds were measured (dpi -8 and dpi 14), the next day infected birds were measured (dpi -7, dpi15)
+#this code makes a new column dpi.new that combines dpi 14 and 15
+m.ab$dpi.new <- ifelse(m.ab$dpi %in% c(14, 15), "14", as.integer(m.ab$dpi))
+
+#i then use dpi.new to replace the dpi column to combine dpi -7 and -8
+m.ab$dpi <- ifelse(m.ab$dpi %in% c(-7, -8), "-8", as.integer(m.ab$dpi.new))
+
+m.ab$dpi.new <- NULL #delete dpi.new column
+
+m.ab$dpi <- as.numeric(m.ab$dpi)
+
+m.ab <- m.ab %>%
+  filter(experiment_location == "vt") #include only birds at VT
+```
+General overview of antibody responses
+```{r, warning=FALSE}
+ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  stat_smooth(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5, span=1)+
+  #scale_color_manual(values = c("red", "green4","blue"))+
+  labs(x="Days Post Infection", y="ELISA OD", color="Primary Treatment")+
+  facet_wrap(~primary_treatment)
+```
+
+Sex differences during primary infection
+```{r Sex differences during primary infection: Pathogen Load}
+#fraction that got infected during primary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment) %>%
+  mutate(prim_prop = sum(infected_prim)/n())
+
+#by sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, sex) %>%
+  mutate(prim_prop_sex = sum(infected_prim)/n())
+
+#by dpi
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi, sex) %>%
+  mutate(prim_prop_dpi = sum(infected)/n())
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop, color=primary_treatment))+
+  geom_point()+
+    labs(x="Primary Treatment", y="Proportion Infected During Primary Infection", color= "Primary Treatment")
+
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_sex, color=primary_treatment))+
+  geom_point()+
+      labs(x="Primary Treatment", y="Proportion Infected During Primary Infection", color= "Primary Treatment")+
+  facet_wrap(~sex)
+
+#Proportion infected day 7 (qPCR) by sex
+ggplot(m.ab %>% filter(dpi ==7), aes(x=primary_treatment, y=prim_prop_dpi, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  labs(x="Primary Treatment", y="Proportion Infected Day 7", color= "Primary Treatment")+
+  facet_wrap(~sex)
+
+```
+
+Sex differences during primary infection: Eye Score
+```{r, warning=FALSE}
+#fraction that were diseased during primary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment) %>%
+  mutate(prim_prop_dis = sum(ever_diseased)/n())
+
+#by sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, sex) %>%
+  mutate(prim_prop_dis_sex = sum(ever_diseased)/n())
+
+#by dpi
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi) %>%
+  mutate(prim_prop_dis_dpi = sum(diseased)/n())
+
+#by dpi x sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi, sex) %>%
+  mutate(prim_prop_dis_dpi_sex = sum(diseased)/n())
+
+#all birds
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_dis, color=primary_treatment))+
+  geom_point()+
+    labs(x="Primary Treatment", y="Proportion Diseased During Primary Infection", color= "Primary Treatment")
+
+#by sex
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_dis_sex, color=fct_rev(primary_treatment)))+
+  geom_point()+
+      labs(title="Proportion with Eye Score > 0 during Primary Infection", x="Primary Treatment", y="Proportion Diseased During Primary Infection", color= "Primary Treatment")+
+  facet_wrap(~sex)
+
+#by day
+ggplot(m.ab %>% filter(dpi < 42), aes(x=dpi, y=prim_prop_dis_dpi, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  stat_smooth(aes(group=primary_treatment), method="loess", span=0.5)+
+  labs(x="Primary Treatment", y="Proportion Diseased", color= "Primary Treatment")
+
+#by day x sex
+ggplot(m.ab %>% filter(dpi < 42), aes(x=dpi, y=prim_prop_dis_dpi_sex, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  stat_smooth(aes(group=primary_treatment), method="loess", span=0.5)+
+  labs(x="Primary Treatment", y="Proportion Diseased", color= "Primary Treatment")+
+  facet_wrap(~sex)
+
+
+
+```
+Duration of disease
+```{r}
+m.ab$dpi <- as.numeric(m.ab$dpi)
+diseased_duration <- m.ab %>%
+  filter(diseased == 1) %>%
+  group_by(band_number, primary_treatment, sex) %>%
+  summarize(diseased_duration = max(dpi) - min(dpi))
+diseased_duration
+diseased_duration$diseased_duration <- as.numeric(diseased_duration$diseased_duration)
+
+
+hist(diseased_duration$diseased_duration, breaks = 10)
+ggplot(diseased_duration, aes(x=diseased_duration))+
+  geom_histogram(aes(fill=sex), position="dodge")
+```
+
+Sex differences during primary infection: Antibodies
+```{r}
+#fraction that seroconverted during primary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment) %>%
+  mutate(prim_prop_ab = sum(ever_seropos)/n())
+
+#by sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, sex) %>%
+  mutate(prim_prop_ab_sex = sum(ever_seropos)/n())
+summary(m.ab$prim_prop_ab_sex)
+#by dpi
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi) %>%
+  mutate(prim_prop_ab_dpi = sum(seropos)/n())
+
+summary(m.ab$prim_prop_ab_dpi)
+
+#by dpi x sex
+m.ab <- m.ab %>%
+  group_by(primary_treatment, dpi, sex) %>%
+  mutate(prim_prop_ab_dpi_sex = sum(seropos)/n())
+
+#all birds
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_ab, color=primary_treatment))+
+  geom_point()+
+    labs(x="Primary Treatment", y="Proportion Seropositive During Primary Infection", color= "Primary Treatment")
+
+#by sex
+ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_ab_sex, color=fct_rev(primary_treatment)))+
+  geom_point()+
+      labs(title="Proportion Seropositive during Primary Infection", x="Primary Treatment", y="Proportion Seropositive During Primary Infection", color= "Primary Treatment")+
+  facet_wrap(~sex)
+
+#by day
+ggplot(m.ab %>% filter(dpi < 42), aes(x=dpi, y=prim_prop_ab_dpi, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  #stat_smooth(aes(group=primary_treatment), method="loess", span=0.75)+
+  labs(x="Primary Treatment", y="Proportion Seropositive", color= "Primary Treatment")
+
+#by day x sex
+ggplot(m.ab %>% filter(dpi < 42), aes(x=dpi, y=prim_prop_ab_dpi_sex, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  stat_smooth(aes(group=primary_treatment), method="loess", span=1)+
+  labs(x="Primary Treatment", y="Proportion Seropositive", color= "Primary Treatment")+
+  facet_wrap(~sex)
+```
+
+Sex differences during secondary infection
+```{r Sex differences during secondary infection: Pathogen Load, warning=FALSE}
+m.ab$secondary_dose <- as.numeric(m.ab$secondary_dose)
+ggplot(m.ab %>% filter(dpi == 56), aes(x=sex, y=elisa_od, color = sex))+
+  geom_jitter(alpha=0.25, width=0.25)+
+  geom_hline(yintercept=0.061, alpha=0.5, linetype="dashed")+
+  stat_summary(aes(x=sex, y=elisa_od, group = secondary_treatment), geom="point", shape = "-", fun=mean, size=10, alpha=1)+
+  labs(x="Days Post Infection", y="Antibody Levels", color= "Sex")+
+  facet_wrap(~primary_treatment~secondary_dose, ncol=5)
+
+#fraction that got infected during secondary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment, secondary_dose) %>%
+  mutate(sec_prop = sum(infected_sec)/n())
+
+#proportion infected during secondary treatment
+ggplot(m.ab %>% filter(dpi > 42), aes(x=as.factor(secondary_dose), y=sec_prop, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  labs(title = "Proportion Infected After Secondary Inoculation", y="Proportion Infected", x= "Secondary Dose", color= "Primary Treatment")
+
+#by sex
+#fraction that got infected during secondary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment, secondary_dose, sex) %>%
+  mutate(sec_prop_sex = sum(infected_sec)/n())
+
+ggplot(m.ab %>% filter(dpi > 42), aes(x=as.factor(secondary_dose), y=sec_prop_sex, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  labs(title = "Proportion Infected After Secondary Inoculation", y="Proportion Infected", x= "Secondary Dose", color= "Primary Treatment")+
+  facet_wrap(~sex, nrow=2)
+
+#by dpi
+#fraction that got infected during secondary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment, secondary_dose, dpi) %>%
+  mutate(sec_prop_dpi = sum(infected)/n())
+
+
+ggplot(m.ab %>% filter(dpi > 42), aes(x=as.factor(secondary_dose), y=sec_prop_dpi, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  labs(title = "Proportion Infected After Secondary Inoculation", y="Proportion Infected", x= "Secondary Dose", color= "Primary Treatment")+
+  facet_wrap(~dpi, nrow=1)
+
+#by dpi and sex
+#fraction that got infected during secondary treatment by group
+m.ab <- m.ab %>%
+  group_by(primary_treatment, secondary_dose, dpi, sex) %>%
+  mutate(sec_prop_dpi_sex = sum(infected)/n())
+
+ggplot(m.ab %>% filter(dpi > 42), aes(x=as.factor(secondary_dose), y=sec_prop_dpi_sex, color=fct_rev(primary_treatment)))+
+  geom_point(alpha=0.5)+
+  labs(title = "Proportion Infected After Secondary Inoculation", y="Proportion Infected", x= "Secondary Dose", color= "Primary Treatment")+
+  facet_grid(~sex~dpi)
+
+
+ggplot(m.ab %>% filter(dpi > 42), aes(x=dpi, y=sec_prop_dpi_sex, color=(as.factor(secondary_dose))))+
+  scale_color_manual(values=c("white", "lightblue", "green4", "purple4", "red3"))+
+  geom_point(alpha=0.5)+
+  geom_line()+
+  labs(title = "Proportion Infected After Secondary Inoculation", y="Proportion Infected", x= "DPI", color= "Secondary Dose")+
+  facet_grid(~primary_treatment ~sex)+
+  theme_bw()
+
+a <- m.ab %>%
+  group_by(secondary_dose, primary_treatment)%>%
+  filter(dpi > 42 & sex == "Female")%>%
+  summarise(n())
+a
+
+
+#eye score
+ggplot(m.ab %>% filter(dpi > 42), aes(x=dpi, y=tes, color=(as.factor(secondary_dose))))+
+  scale_color_manual(values=c("white", "lightblue", "green4", "purple4", "red3"))+
+  geom_point(alpha=0.5)+
+  stat_smooth(aes(group = as.factor(band_number), na.rm=T, span=1))+
+  labs(y="Total Eye Score", x= "DPI", color= "Secondary Dose")+
+  facet_grid(primary_dose ~ sex)+
+  theme_bw()
