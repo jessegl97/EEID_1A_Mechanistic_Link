@@ -442,6 +442,129 @@ pairs(emm_results)
 
 ```
 
+Does prior exposure induce heterogeneity in antibody levels?####
+```{r Does prior exposure induce heterogeneity in antibody levels?}
+p.ab <- p.ab %>%
+  filter(dpi !=56)
+#subset antibodies by groups to look at their variance
+#subset by primary treatment (number doesn't matter) with 1|band_number as random effect
+#variance of random effect should be highest in highest heterogeneity groups
+library(lme4)
+unique(p.ab$band_number)
+#across all primary infection days, which groups are most heterogeneous?
+glm.all <- glmmTMB(elisa_od~1 +(1|band_number), data=p.ab, family=Gamma())
+glm.sham <- glmmTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "sham"), family=Gamma())
+glm.low <- glmemTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "low"), family=Gamma())
+glm.high <- glmmTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "high"), family=Gamma())
+
+#glm.all.nest<-glm.all <- glmer(elisa_od~1 +(1|band_number) +(1|primary_treatment), data=p.ab, family=Gamma())
+#summary(glm.all.nest)
+summary(glm.all); summary(glm.sham); summary(glm.low); summary(glm.high)
+#options - use SD to get a CI around each four variance estimates OR
+#add up the log lik from the 4models and calculate AIC
+
+AIC(glm.sham,glm.low, glm.high, glm.all)
+
+##Days 14 and 41 only
+#quick graph showing differences in variance by group
+#var <- c(11.5496, 0.284649, 8.65716, 5.8528) #variance from table above
+#ci <- c(3.39885, 0.534, 2.9423, 2.4192) #Standard Deviation from table above
+#g <- c("All", "Sham", "Low", "High") #Groups
+
+##Days -8, 14, and 41 
+var <- c(10.89235, 0.267613, 7.58692, 5.2232) #variance from table above
+ci <- c(3.3004, 0.51731, 2.7544, 2.2854) #Standard Deviation from table above
+g <- c("All", "Sham", "Low", "High") #Groups
+
+#new df with variance and error for error bars (min/max)
+variability <- data.frame(g,var, ci)
+variability$min <- variability$var - variability$ci #new column for lowerbound error
+variability$max <- variability$var + variability$ci #new column for upperbound error
+
+g.var <- ggplot(variability %>% filter(g != "All"), aes(x=fct_rev(g), y=var, color=g))+
+  geom_point(size=5)+
+  geom_errorbar(aes(ymin=min, ymax=max), width=0.5)+ #add errorbars representing +/- 1 SD
+  labs(title = "Primary Infection Antibody Variance", x="Primary Treatment", y="Variance", color="Treatment")+
+  scale_color_manual(values=c("gray15", "gray60", "gray85"))+
+  theme_minimal()
+
+g.var
+
+
+m.ab%>%
+  group_by(primary_treatment)%>%
+  summarise(count=n_distinct(band_number))
+
+m.ab%>%
+  group_by(primary_treatment, dpi)%>%
+  summarise(count=n_distinct(band_number))
+
+
+```
+
+Residual Models
+```{r}
+####Residual Models####
+p.ab$band_number <- as.numeric(p.ab$band_number)
+p.ab <- p.ab %>%
+  filter(dpi <= 41 )%>%
+  drop_na(band_number, dpi, elisa_od)
+glm <- glmmTMB(elisa_od ~ 1 + (band_number|dpi), data=p.ab, family=Gamma())
+glm.a <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=p.ab, family=Gamma())
+glm.b <- glmmTMB(elisa_od ~ (1|band_number) + (1|dpi), data=p.ab, family=nbinom2)
+summary(glm.a)
+resid(glm.a)
+hist(resid(glm.a))
+p.ab$resid <- resid(glm.a)
+hist(p.ab$resid)
+lm1 <- lm(abs(resid) ~ primary_treatment, data=p.ab)
+
+anova(lm1)
+summary(lm1)
+
+ggplot(r.ab, aes(x=primary_treatment, y=abs(resid)))+
+  geom_jitter()+
+  theme_bw()
+
+#specify intercept as 0.045
+ab.1441 <- p.ab %>%
+  filter(dpi == 14 | dpi == 41)
+
+glm.c <- glm(elisa_od ~ 1  + (band_number|dpi), data= ab.1441, family=Gamma())
+ab.1441$resid <- resid(glm.c)
+
+glm.all <- glmer(elisa_od~1 +(1|dpi), data=ab.1441, family=Gamma())
+glm.sham <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "sham"), family=Gamma())
+glm.low <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "low"), family=Gamma())
+glm.high <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "high"), family=Gamma())
+
+lm.a <- lm(resid~primary_treatment, data= ab.1441)
+
+ggplot(ab.1441, aes(x=primary_treatment, y=resid))+
+  geom_jitter(width=0.25)
+
+
+ggplot(ab.1441, aes(x=primary_treatment, y=abs(resid)))+
+  geom_jitter(width=0.25)
+
+anova(lm.a)
+summary(lm.a)
+#for only pid 41
+ab.41 <- p.ab %>%
+  filter(dpi == 41)
+
+glm41 <- glmmTMB(elisa_od ~ 1, data=ab.41, family=Gamma())
+ab.41$resid <- resid(glm41)
+
+lm2 <- lm(resid ~ primary_treatment, data=ab.41)
+
+anova(lm2)
+summary(lm2)
+
+ggplot(ab.41, aes(x=primary_treatment, y=resid))+
+  geom_point()+
+  theme_bw()
+```
 
 
 *Summary: *

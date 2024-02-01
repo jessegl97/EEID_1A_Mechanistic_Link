@@ -265,7 +265,7 @@ ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_sex, colo
 ggplot(m.ab %>% filter(dpi < 42), aes(x=primary_treatment, y=prim_prop_dpi, color=primary_treatment))+
   geom_point()+
   facet_wrap(~dpi)
-
+unique(p.ab$primiary_treatment)
 #confirm all elisa_ods were the same before infection
 lm0 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
 summary(lm0)
