@@ -140,6 +140,10 @@ m.ab %>%
 m.ab <- m.ab %>%
   filter(band_number != 2505)
 
+#omit from dataset - not recovered by day 41
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
+
 #which birds are seropositive but qPCR negative?
 m.ab%>%
   filter(infected_prim == 0 & elisa_od > 0.061 & dpi < 42)%>%
@@ -1211,7 +1215,9 @@ p.ab <- p.ab %>%
   filter(dpi !=56)
 #subset antibodies by groups to look at their variance
 #subset by primary treatment (number doesn't matter) with 1|band_number as random effect
-#variance of random effect should be highest in highest heterogeneity groups
+#variance of random effect should be highest in highest heterogeneity groups#omit from dataset
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
 library(lme4)
 #across all primary infection days, which groups are most heterogeneous?
 glm.all <- glmer(elisa_od~1 +(1|band_number), data=p.ab, family=Gamma())

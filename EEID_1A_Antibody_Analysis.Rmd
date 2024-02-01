@@ -110,7 +110,7 @@ ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
   facet_wrap(~infected_prim)
 #2415 has eye score but no path load - super resistant?
 ```
-```{r Omit 2505}
+```{r Omit Birds}
 #check for seropositive birds from quarantine from dataset
 m.ab %>%
   filter(dpi == -8) %>%
@@ -125,6 +125,20 @@ m.ab <- m.ab %>%
 m.ab%>%
   filter(infected_prim == 0 & elisa_od > 0.061 & dpi < 42)%>%
   dplyr::select(band_number, dpi, tes, elisa_od, quantity, primary_treatment)
+
+#omit birds that were not recovered by secondary infection: 2274, 2514, 2469, 2520
+not_recovered <- m.ab %>% 
+  filter(band_number %in% c(2274, 2514, 2469, 2520))
+
+#confirm quantity > cutoff at dpi 41
+ggplot(not_recovered, aes(x=dpi, y=quantity, color=as.factor(band_number)))+
+  geom_point()+
+  ylim(min=0, max=400)
+
+#omit from dataset
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
+
 ```
 
 ```{r Format DPI}
@@ -170,7 +184,7 @@ hist(diseased_duration$diseased_duration, breaks = 25)
 ggplot(diseased_duration, aes(x=diseased_duration))+
   geom_histogram(aes(fill=fct_rev(primary_treatment)), position="dodge", bins = 15)+
   labs(x="Duration of Pathology", y="Count", fill="Primary Treatment")
-#there are sham birds on this graph with 20 days of pathology :()
+#there are sham birds on this graph with 20 days of pathology :(
 ```
 
 ####Does Inoculation Dose Predict Antibody Levels?####
