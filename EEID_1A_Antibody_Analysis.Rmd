@@ -53,9 +53,31 @@ m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
 m.ab$tes <- m.ab$l_eye_score + m.ab$r_eye_score
 
 ```
+
+```{r Format DPI}
+#some sample days were split between two days. 
+#One day experimental birds were measured (dpi -8 and dpi 14), the next day infected birds were measured (dpi -7, dpi15)
+#this code makes a new column dpi.new that combines dpi 14 and 15
+m.ab$dpi.new <- ifelse(m.ab$dpi %in% c(14, 15), "14", as.integer(m.ab$dpi))
+
+#i then use dpi.new to replace the dpi column to combine dpi -7 and -8
+m.ab$dpi <- ifelse(m.ab$dpi %in% c(-7, -8), "-8", as.integer(m.ab$dpi.new))
+
+m.ab$dpi.new <- NULL #delete dpi.new column
+
+m.ab$dpi <- as.numeric(m.ab$dpi)
+
+#make baseline eyescore 0
+m.ab <- m.ab %>%
+  mutate(tes = ifelse(dpi == -8 & is.na(tes), 0, tes))
+
+m.ab <- m.ab %>%
+  filter(experiment_location == "vt") #include only birds at VT
+```
+
 Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
 ```{r Thresholds}
-m.ab$threshold_cutoff = 15
+m.ab$threshold_cutoff = 50
 m.ab$seropos_cutoff = 0.061
 m.ab$pathology_cutoff = 0
 ```
@@ -102,12 +124,22 @@ m.ab <- m.ab %>%
   mutate(ever_diseased = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
   ungroup()
 
+#Rules for infection: We defined a bird as infected if it had eye score >= 0.5, pathogen load > 15 copies, or both
+m.ab <- m.ab %>%
+  mutate(inf = ifelse(quantity > threshold_cutoff | tes > pathology_cutoff, 1, 0))
+
+#ever inf during primary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(inf_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(inf, 0) == 1), 1, 0)) %>%
+  ungroup()
+
 ```
 
 ```{r Eye Score Formatting}
 ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
   geom_jitter(height=0.1)+
-  facet_wrap(~infected_prim)
+  facet_wrap(~inf_prim)
 #2415 has eye score but no path load - super resistant?
 ```
 ```{r Omit Birds}
@@ -115,7 +147,7 @@ ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
 m.ab %>%
   filter(dpi == -8) %>%
   filter(elisa_od >= 0.061)%>%
-  dplyr::select(band_number, elisa_od, primary_treatment, secondary_treatment, infected, seropos, dpi, ELISA.Run.Date)
+  dplyr::select(band_number, elisa_od, primary_treatment, secondary_treatment, inf, seropos, dpi, ELISA.Run.Date)
 
 #omit 2505 from data set for analysis as it was positive at quarantine
 m.ab <- m.ab %>%
@@ -134,29 +166,9 @@ not_recovered <- m.ab %>%
 ggplot(not_recovered, aes(x=dpi, y=quantity, color=as.factor(band_number)))+
   geom_point()+
   ylim(min=0, max=400)
-
-#omit from dataset
-m.ab <- m.ab %>%
-  filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
-
 ```
 
-```{r Format DPI}
-#some sample days were split between two days. 
-#One day experimental birds were measured (dpi -8 and dpi 14), the next day infected birds were measured (dpi -7, dpi15)
-#this code makes a new column dpi.new that combines dpi 14 and 15
-m.ab$dpi.new <- ifelse(m.ab$dpi %in% c(14, 15), "14", as.integer(m.ab$dpi))
 
-#i then use dpi.new to replace the dpi column to combine dpi -7 and -8
-m.ab$dpi <- ifelse(m.ab$dpi %in% c(-7, -8), "-8", as.integer(m.ab$dpi.new))
-
-m.ab$dpi.new <- NULL #delete dpi.new column
-
-m.ab$dpi <- as.numeric(m.ab$dpi)
-
-m.ab <- m.ab %>%
-  filter(experiment_location == "vt") #include only birds at VT
-```
 General overview of antibody responses
 ```{r, warning=FALSE}
 ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_treatment)))+
@@ -169,22 +181,51 @@ ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_
 ```
 
 
-Duration of disease * this is wrong *
+Duration of disease based off of eye score during primary infection
 ```{r}
 m.ab$dpi <- as.numeric(m.ab$dpi)
-diseased_duration <- m.ab %>%
-  filter(diseased == 1) %>%
+d.ab <- m.ab %>%
+  filter(dpi < 42 & dpi > 0) %>%
+  select(band_number, dpi, primary_treatment, sex, inf, quantity, diseased)
+d.ab
+
+ggplot(d.ab, aes(x=dpi, y=inf))+
+  geom_jitter()+
+  facet_wrap(~primary_treatment)
+
+m.ab %>% 
+  filter(dpi == 41 & inf == 1)
+
+m.ab %>%
+  group_by(band_number) %>%
+  summarize(inf_count = sum(inf == 1, na.rm = TRUE))
+
+m.ab %>%
+  filter(dpi <= 41)%>%
   group_by(band_number, primary_treatment, sex) %>%
-  summarize(diseased_duration = max(dpi) - min(dpi))
+  summarize(a=first(dpi[diseased == 1]),
+            b=last(dpi[diseased == 1]))
+
+diseased_duration <- m.ab %>%
+  filter(dpi <=41)%>%
+  group_by(band_number, primary_treatment, sex) %>%
+  summarize(diseased_duration = ifelse(sum(diseased == 1) == 0, 0, last(dpi[diseased == 1] + 1) - first(dpi[diseased == 1]))) #add 1 to last diseased to account for birds that only had eye score for 1 day (dpi 7 is first and last eye score > would come up as 0, but had an eye score for at least one day)
 diseased_duration
 diseased_duration$diseased_duration <- as.numeric(diseased_duration$diseased_duration)
 
 
-hist(diseased_duration$diseased_duration, breaks = 25)
-ggplot(diseased_duration, aes(x=diseased_duration))+
-  geom_histogram(aes(fill=fct_rev(primary_treatment)), position="dodge", bins = 15)+
-  labs(x="Duration of Pathology", y="Count", fill="Primary Treatment")
-#there are sham birds on this graph with 20 days of pathology :(
+hist(diseased_duration$diseased_duration, breaks = 41)
+
+#histogram showing length with eye score > 0 during primary infection
+g.primary.duration <- ggplot(diseased_duration, aes(x=diseased_duration))+
+  geom_histogram(aes(fill=fct_rev(primary_treatment)), position="dodge", bins = 48)+
+  labs(title = "Duration of Pathology: Primary Infection", x="Duration of Pathology", y="Count", fill="Primary Treatment")
+g.primary.duration
+
+ggplot(m.ab, aes(x=dpi, y=tes))+
+  geom_jitter()+
+  facet_wrap(~primary_treatment)
+
 ```
 
 ####Does Inoculation Dose Predict Antibody Levels?####
@@ -580,5 +621,10 @@ ggplot(ab.41, aes(x=primary_treatment, y=resid))+
   theme_bw()
 ```
 
+####Secondary Inoculation####
+```{r}
+#omit from dataset - were still infected (path load) on day 41 prior to reinfection day 42
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
+```
 
-*Summary: *
