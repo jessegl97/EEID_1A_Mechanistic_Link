@@ -1331,6 +1331,10 @@ ggplot(ab.41, aes(x=primary_treatment, y=resid))+
 
 ####Histograms####
 #new df with labels for graphs - treatment + n
+m.ab %>%
+  group_by(primary_treatment)%>%
+  count()
+
 treat_names_n <- c(
   'high' = "High (n=53)",
   'low' = "Low (n=51)",
@@ -1503,6 +1507,8 @@ cv.primary <- ggplot(m.cv %>% filter(dpi != -8), aes(x=fct_rev(primary_treatment
 cv.primary
 
 #Calculate CV each day including secondary
+m.ab$secondary_dose <- as.numeric(m.ab$secondary_dose)
+
 s.cv <- m.ab %>% 
   group_by(dpi, primary_treatment, secondary_dose)%>%
   summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
@@ -1525,20 +1531,29 @@ cv.secondary <- ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), 
 
 cv.secondary
 
+ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_cv, color=fct_rev(primary_treatment)))+ 
+  geom_point(size=2)+
+  geom_path(aes(group=primary_treatment))+
+  facet_wrap(~primary_treatment)
+  #labs(x="Primary Treatment", y="CV", color="Primary Treatment")
+
 #Graph of elisa_od dpi 56
+#set color scheme
+sec_colors <- c( "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#F8766D")
+
 elisa.secondary <- ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, color=as.factor(secondary_dose), shape = as.factor(secondary_dose)))+
   geom_jitter(aes(color=as.factor(secondary_dose)), size=1.5)+
   #geom_errorbar(aes(ymax=max, ymin=min), color="black", size=0.5, width=0.5)+
   labs(x="Primary Treatment", y="ELISA OD", fill="Treatment")+
   stat_summary(aes(group=secondary_treatment), color="black", fun=mean, shape = "-", size=3)+
   geom_hline(yintercept=0.061)+
-  scale_color_manual(values=c( "white", "gray75", "gray60", "gray50", "gray20"),
-                    labels = c("0", "30", "100", "300", "7000"))+
-  facet_wrap(~fct_rev(primary_treatment), labeller = as_labeller(treat_names), ncol=5)+
+  scale_color_manual(values=sec_colors)+
+  facet_wrap(~fct_rev(primary_treatment))+
   theme_gray()
 
 elisa.secondary
 cv.secondary + elisa.secondary
+
 
 ######include secondary infection now####
 s.ab <- m.ab %>%
@@ -1601,10 +1616,9 @@ g.ab.primary <- ggplot(data = m.ab %>% filter(elisa_od != 0), aes(x = primary_tr
   facet_wrap(~dpi)
 g.ab.primary
 #continuous look at antibodies
-ggplot(data = m.ab %>% filter(elisa_od != 0), aes(x = dpi, y = elisa_od, color = primary_treatment)) +
+ggplot(data = m.ab %>% filter(elisa_od != 0), aes(x = dpi, y = elisa_od, color = fct_rev(primary_treatment))) +
   #geom_boxplot(outlier.shape = NA) +
   geom_point(size = 0.5) +
-  scale_colour_manual(values=c( "ivory4", "blue", "red"))+
   geom_line(aes(group = as.factor(band_number)), size = 0.5, alpha = 0.25) +
   stat_summary(aes(group=primary_treatment), fun=mean, geom="point", alpha=1, size=3)+
   stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=1, size=1)+
@@ -1616,33 +1630,8 @@ ggplot(data = m.ab %>% filter(elisa_od != 0), aes(x = dpi, y = elisa_od, color =
   #             geom= "errorbar", size=0.25, width = 0.25, alpha=1)+
   geom_hline(yintercept = 0.061, color = "black", alpha = 0.75, linetype="dashed") +
   labs(x="Days Post Inoculation", y="MG Antibodies OD", color= "Primary Treatment")+
-  theme_minimal()
-
-g.ab.all
-
- #new data frame with just dppi 56 elisa od and treatments
-
-sid14 <- m.ab%>%
-  select(dpi, bird_ID, band_number.x, elisa_od, primary_treatment, primary_dose, secondary_treatment, secondary_dose)
-sid14
-
-
-g.ab.sid14 <- ggplot(data = sid14 %>% filter(dpi=="56"), aes(x = primary_treatment, y = elisa_od, color = primary_treatment)) +
-  #geom_point(size = 0.5) +
-  geom_jitter(size=0.5) +
-  scale_colour_manual(values=c( "red", "blue", "ivory4"))+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="point", alpha=1, size=3, shape=3)+
-  stat_summary(aes(group=primary_treatment, color = primary_treatment), fun.y=mean,
-               fun.min = function(x) mean(x)-sd(x),
-               fun.max = function(x) mean(x)+sd(x),
-               #fun.min = function(x) mean(x)-(sd(x)/mean(x)), #CV
-               #fun.max = function(x) mean(x)+(sd(x)/mean(x)), #CV
-               geom= "errorbar", size=0.75)+
-  
-  geom_hline(yintercept = 0.061, color = "black", alpha = 0.75) +
-  ylab("MG Antibodies OD PID 56 (SID 14)") +
-  xlab("Inoculation Dose")+
   facet_wrap(~secondary_dose)
 
-g.ab.sid14
+
+
 

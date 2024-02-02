@@ -51,7 +51,8 @@ m.ab$l_eye_score <- as.numeric(m.ab$l_eye_score)
 m.ab$r_eye_score <- as.numeric(m.ab$r_eye_score)
 #total eye score = sum of l and r eye score
 m.ab$tes <- m.ab$l_eye_score + m.ab$r_eye_score
-
+m.ab$band_number <- as.factor(m.ab$band_number)
+m.ab$secondary_dose <- as.numeric(m.ab$secondary_dose)
 ```
 
 ```{r Format DPI}
@@ -73,6 +74,18 @@ m.ab <- m.ab %>%
 
 m.ab <- m.ab %>%
   filter(experiment_location == "vt") #include only birds at VT
+```
+
+Format Graphs
+```{r}
+#set color scheme primary treatment
+pri_colors <- c("#F8766D", "#00BA38", "#619CFF")
+#set color scheme secondary treatment
+sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
+sec_default <- c( "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#F8766D")
+def_colors <- c("#F8766D", "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#7A76A6")
+
+
 ```
 
 Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
@@ -163,11 +176,10 @@ not_recovered <- m.ab %>%
   filter(band_number %in% c(2274, 2514, 2469, 2520))
 
 #confirm quantity > cutoff at dpi 41
-ggplot(not_recovered, aes(x=dpi, y=quantity, color=as.factor(band_number)))+
+ggplot(not_recovered, aes(x=dpi, y=quantity, color=band_number))+
   geom_point()+
   ylim(min=0, max=400)
 ```
-
 
 General overview of antibody responses
 ```{r, warning=FALSE}
@@ -175,12 +187,10 @@ ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_
   geom_point()+
   geom_hline(yintercept = 0.061)+
   stat_smooth(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5, span=1)+
-  #scale_color_manual(values = c("red", "green4","blue"))+
+  scale_color_manual(values = pri_colors)+
   labs(x="Days Post Infection", y="ELISA OD", color="Primary Treatment")+
   facet_wrap(~primary_treatment)
 ```
-
-
 Duration of disease based off of eye score during primary infection
 ```{r}
 m.ab$dpi <- as.numeric(m.ab$dpi)
@@ -227,8 +237,8 @@ ggplot(m.ab, aes(x=dpi, y=tes))+
   facet_wrap(~primary_treatment)
 
 ```
-
 ####Does Inoculation Dose Predict Antibody Levels?####
+-----
 ```{r New df p.ab for primary }
 #data frame with only primary infection (no PID 56)
 p.ab <- m.ab %>%
@@ -286,7 +296,7 @@ pairs(emm_r)
 Using primary_treatment (categorical), I show that birds inoculated with MG produce antibodies in a dose-dependent manner.
 
 Across all days primary infection, inoculation dose 
-```{r}
+```{r All days}
 lm1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
 summary(lm1)
 
@@ -505,23 +515,18 @@ p.ab <- p.ab %>%
 #subset by primary treatment (number doesn't matter) with 1|band_number as random effect
 #variance of random effect should be highest in highest heterogeneity groups
 library(lme4)
-unique(p.ab$band_number)
+
 #across all primary infection days, which groups are most heterogeneous?
-glm.all <- glmmTMB(elisa_od~1 +(1|band_number), data=p.ab, family=Gamma())
-glm.sham <- glmmTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "sham"), family=Gamma())
-glm.low <- glmemTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "low"), family=Gamma())
-glm.high <- glmmTMB(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "high"), family=Gamma())
+glm.all <- glmer(elisa_od~1 +(1|band_number), data=p.ab, family=Gamma())
+glm.sham <- glmer(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "Sham"), family=Gamma())
+glm.low <- glmer(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "Low"), family=Gamma())
+glm.high <- glmer(elisa_od~1 +(1|band_number), data=subset(p.ab, primary_treatment == "High"), family=Gamma())
 
-#glm.all.nest<-glm.all <- glmer(elisa_od~1 +(1|band_number) +(1|primary_treatment), data=p.ab, family=Gamma())
-#summary(glm.all.nest)
 summary(glm.all); summary(glm.sham); summary(glm.low); summary(glm.high)
-#options - use SD to get a CI around each four variance estimates OR
-#add up the log lik from the 4models and calculate AIC
 
-AIC(glm.sham,glm.low, glm.high, glm.all)
+AIC(glm.sham,glm.low, glm.high)
 
 ##Days 14 and 41 only
-#quick graph showing differences in variance by group
 #var <- c(11.5496, 0.284649, 8.65716, 5.8528) #variance from table above
 #ci <- c(3.39885, 0.534, 2.9423, 2.4192) #Standard Deviation from table above
 #g <- c("All", "Sham", "Low", "High") #Groups
@@ -533,17 +538,14 @@ g <- c("All", "Sham", "Low", "High") #Groups
 
 #new df with variance and error for error bars (min/max)
 variability <- data.frame(g,var, ci)
-variability$min <- variability$var - variability$ci #new column for lowerbound error
-variability$max <- variability$var + variability$ci #new column for upperbound error
 
-g.var <- ggplot(variability %>% filter(g != "All"), aes(x=fct_rev(g), y=var, color=g))+
-  geom_point(size=5)+
-  geom_errorbar(aes(ymin=min, ymax=max), width=0.5)+ #add errorbars representing +/- 1 SD
-  labs(title = "Primary Infection Antibody Variance", x="Primary Treatment", y="Variance", color="Treatment")+
-  scale_color_manual(values=c("gray15", "gray60", "gray85"))+
+g.var.primary <- ggplot(variability %>% filter(g != "All"), aes(x=fct_rev(g), y=ci, color=g))+
+  geom_point(size=3)+
+  #geom_errorbar(aes(ymin=min, ymax=max), width=0.5)+ #add errorbars representing +/- 1 SD
+  labs(title = "Primary Infection Variation in Antibody Levels", x="Primary Treatment", y="Standard Deviation", color="Treatment")+
   theme_minimal()
 
-g.var
+g.var.primary
 
 
 m.ab%>%
@@ -556,45 +558,109 @@ m.ab%>%
 
 
 ```
+(chatGPT)
+In a mixed-effects model, the random effects capture variability among groups or clusters in the data. The variance component represents the variability of the random effects, while the standard deviation is the square root of the variance.
 
-Residual Models
-```{r}
+Mathematically, the standard deviation (σ) is the square root of the variance (σ^2), so σ = √(variance).
+
+For example, if the variance of the random effects for a certain grouping factor is 5.2232, as in your model summary, then the standard deviation would be approximately √5.2232 ≈ 2.2854, as also shown in the summary output.
+
+So, in summary, the standard deviation provides a more interpretable measure of the dispersion of the random effects compared to the variance, as it is in the same units as the original data.
+
+Residual Models: Method to look at the amount of variance within each treatment group while accounting for variance from differences in dpi
+
+```{r Variance across DPI}
 ####Residual Models####
-p.ab$band_number <- as.numeric(p.ab$band_number)
 p.ab <- p.ab %>%
   filter(dpi <= 41 )%>%
   drop_na(band_number, dpi, elisa_od)
-glm <- glmmTMB(elisa_od ~ 1 + (band_number|dpi), data=p.ab, family=Gamma())
+
+#Levene's Test for Equality of Variances
+library(car)
+leveneTest(elisa_od ~ primary_treatment, data=p.ab)
+##Variance is not equal##
+
+#glm <- glmmTMB(elisa_od ~ 1 + (band_number|dpi), data=p.ab, family=Gamma())
 glm.a <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=p.ab, family=Gamma())
-glm.b <- glmmTMB(elisa_od ~ (1|band_number) + (1|dpi), data=p.ab, family=nbinom2)
+
 summary(glm.a)
 resid(glm.a)
 hist(resid(glm.a))
 p.ab$resid <- resid(glm.a)
 hist(p.ab$resid)
 lm1 <- lm(abs(resid) ~ primary_treatment, data=p.ab)
-
-anova(lm1)
 summary(lm1)
+#subset the data into primary_treatments
+#look at the amount of variance within each treatment while accounting for variance from differences in dpi
+s.ab <- p.ab %>%
+  filter(primary_treatment=="Sham")
+glm.s <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=s.ab, family=Gamma())
+glm.sf <- glm(elisa_od ~ 1+ dpi, data=s.ab, family=Gamma())
+summary(glm.sf)
+plot(allEffects(glm.sf))
+s.SD <- 0.328
 
-ggplot(r.ab, aes(x=primary_treatment, y=abs(resid)))+
-  geom_jitter()+
-  theme_bw()
+s.ab$resid <- resid(glm.s)
 
-#specify intercept as 0.045
-ab.1441 <- p.ab %>%
-  filter(dpi == 14 | dpi == 41)
+glm.s <- glm(abs(resid) ~ 1, data=s.ab, family=Gamma())
+summary(glm.s)
+sd(abs(s.ab$resid))
 
-glm.c <- glm(elisa_od ~ 1  + (band_number|dpi), data= ab.1441, family=Gamma())
-ab.1441$resid <- resid(glm.c)
 
-glm.all <- glmer(elisa_od~1 +(1|dpi), data=ab.1441, family=Gamma())
-glm.sham <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "sham"), family=Gamma())
-glm.low <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "low"), family=Gamma())
-glm.high <- glmer(elisa_od~1 +(1|dpi), data=subset(ab.1441, primary_treatment == "high"), family=Gamma())
+l.ab <- p.ab %>%
+  filter(primary_treatment=="Low")
+glm.l <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=l.ab, family=Gamma())
+glm.lf <- glm(elisa_od ~ 1+ as.factor(dpi), data=l.ab, family=Gamma())
+glm.l1 <- glm(elisa_od ~ 1, data=l.ab)
+summary(glm.l1)
 
-lm.a <- lm(resid~primary_treatment, data= ab.1441)
+l.ab$resid <- (resid(glm.l1))
 
+
+l.SD <- 2.108
+
+h.ab <- p.ab %>%
+  filter(primary_treatment=="High")
+glm.h <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=h.ab, family=Gamma())
+glm.h1 <- glm(elisa_od ~ 1, data=h.ab)
+rh<-abs((resid(glm.h1)))
+mean(rh)
+
+summary(glm.h)
+h.SD <- 4.522
+
+##Days -8, 14, and 41 
+sd <- c(s.SD, l.SD, h.SD) #Standard Deviation from table above
+g <- c("Sham", "Low", "High") #Groups
+
+#new df with variance and error for error bars (min/max)
+sd.dpi <- data.frame(g, sd)
+
+#plot standard deviation from the models above
+ggplot(sd.dpi, aes(x=fct_rev(g), y=sd, color=g))+
+  geom_point(size=3)+
+  labs(title="Variance during Primary Infection", x="Treatment Groups", y="Model Standard Deviation", color="Treatment Groups")
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+ab.41 <- p.ab %>%
+  filter(dpi == 41)
+
+glm.all <- glmmTMB(elisa_od~1 + (1|band_number), data=ab.41, family=Gamma())
+glm.sham <- glmmTMB(elisa_od~1, data=subset(ab.41, primary_treatment == "Sham"), family=Gamma())
+glm.low <- glmmTMB(elisa_od~1, data=subset(ab.41, primary_treatment == "Low"), family=Gamma())
+glm.high <- glmmTMB(elisa_od~1, data=subset(ab.41, primary_treatment == "High"), family=Gamma())
+
+hist(abs(resid(glm.sham)))
+hist(abs(resid(glm.low)))
+hist(abs(resid(glm.high)))
+
+summary(glm.sham)
+ab.1441$resid <- resid(glm.all)
+lm.a <- lm(abs(resid)~primary_treatment, data= ab.1441)
+summary(lm.a)
 ggplot(ab.1441, aes(x=primary_treatment, y=resid))+
   geom_jitter(width=0.25)
 
@@ -621,10 +687,122 @@ ggplot(ab.41, aes(x=primary_treatment, y=resid))+
   theme_bw()
 ```
 
-####Secondary Inoculation####
+Histograms
+```{r Histograms}
+#Add variable indicating the elisa_od mean for each primary_treatment
+p.ab <- p.ab %>%
+  group_by(primary_treatment)%>%
+  mutate(groupmean = mean(elisa_od))
+
+#Add variable indicating the elisa_od mean for each primary_treatment
+p.ab <- p.ab %>%
+  group_by(primary_treatment, dpi)%>%
+  mutate(groupmean.dpi = mean(elisa_od))
+
+#Histogram showing distribution of elisa_od across all sample days by primary_treatment
+ggplot(p.ab%>% filter(dpi != -8), aes(x=elisa_od, fill=fct_rev(primary_treatment)))+
+  #geom_density(color="black", alpha=0.5)+
+  geom_histogram(binwidth = 0.005, position="identity", alpha=2, color="black", size=0.35)+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.19))+
+  geom_vline(data = p.ab %>% filter(dpi != -8), aes(xintercept = groupmean, color = "red"), linetype = "dotted",alpha = 1, show.legend=FALSE) +
+  labs(y= "Count", x= "Antibody Levels", fill="Primary Treatment", color= "Average OD")+
+  #scale_fill_manual(values=c( "white", "gray","black"), labels=treat_names)+
+  scale_color_manual(values = c("red"), guide = guide_legend(title= NULL))+
+  facet_grid(~primary_treatment~dpi)
+
+#Histogram showing mean
+ggplot(p.ab%>% filter(dpi != -8), aes(x=elisa_od, fill=fct_rev(primary_treatment)))+
+  geom_histogram(binwidth = 0.005, position="identity", alpha=2, color="black", size=0.35)+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.19))+
+  geom_vline(data = p.ab%>% filter(dpi != -8), aes(xintercept = groupmean.dpi, color = "red"), linetype = "dotted",alpha = 1, show.legend=FALSE) +
+  labs(y= "Count", x= "Antibody Levels", fill="Primary Treatment", color= "Average OD")+
+  #scale_fill_manual(values=c("black", "gray", "white"), labels=treat_names)+
+  scale_color_manual(values = c("red"), guide = guide_legend(title= NULL))+
+  facet_grid(~primary_treatment~dpi)
+```
+
+Coefficient of Variation: Primary Dose
+```{r Coefficient of Variation}
+#calculate CV
+m.cv.all <- p.ab %>% 
+  group_by(primary_treatment)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od), #this is variation within groups 
+            bird_sd = sd(elisa_od))
+
+#Calculate CV each day
+m.cv <- p.ab %>% 
+  group_by(dpi, primary_treatment)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od))
+
+#Graph of CV calculated from dpi -8 to 41 with error bars +/- 1 SD
+cv.all.primary <- ggplot(m.cv.all, aes(x=primary_treatment, y=bird_cv, color=fct_rev(primary_treatment)))+
+  geom_point(size=3)+
+  labs(title="CV of Antibody Levels Across Primary Infection", x="Primary Treatment", y="CV", color="Treatment")
+  #scale_fill_manual(values=c( "gray90", "gray50", "gray25"))
+
+cv.all.primary
+
+cv.primary <- ggplot(m.cv, aes(x=primary_treatment, y=bird_cv, color=fct_rev(primary_treatment)))+
+  geom_point(size=3)+
+  labs(x="Primary Treatment", y="CV", color="Primary Treatment")+
+  facet_wrap(~dpi, ncol=3)
+
+cv.primary
+
+ggplot(m.cv, aes(x=dpi, y=bird_cv, color=fct_rev(primary_treatment)))+
+  geom_point(size=2)+
+  geom_line()+
+  labs(x="Primary Treatment", y="CV", color="Primary Treatment")
+
+```
+
+Does prior exposure induce heterogeneity in immune responses just prior to reinfection?
+Prior exposure to different doses of MG induces both higher overall antibody levels just prior to infection (p < 0.0001), and more variable antibody levels.
 ```{r}
+
+```
+
+
+----
+####Secondary Inoculation####
+----
+```{r Remove birds that weren't recovered}
 #omit from dataset - were still infected (path load) on day 41 prior to reinfection day 42
 m.ab <- m.ab %>%
   filter(!(band_number %in% c(2274, 2514, 2469, 2520)))
+```
+Overview of secondary antibody levels
+```{r Antibody levels secondary}
+ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, color=as.factor(secondary_dose)))+
+  geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(aes(color=as.factor(secondary_dose)), size=1.5, shape=1, alpha=0.75)+
+  labs(x="Primary Treatment", y="ELISA OD", fill="Treatment")+
+  stat_summary(aes(group=secondary_treatment), fun=mean, shape = 18, size=.5)+
+  scale_color_manual(values=sec_colors)+
+  labs(title = "Antibody Levels Post-Secondary Infection", y= "Antibody Levels", x="Secondary Dose", color="Secondary Dose", shape="Secondary Dose")+
+  facet_wrap(~primary_treatment)
+
+```
+
+
+CV Secondary Inoculation
+```{r Coefficient of Variation}
+#Calculate CV each day including secondary
+m.ab$secondary_dose <- as.numeric(m.ab$secondary_dose)
+
+s.cv <- m.ab %>% 
+  group_by(dpi, primary_treatment, secondary_dose)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od))
+
+ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_cv, color=fct_rev(primary_treatment)))+ 
+  geom_point(size=2)+
+  geom_path(aes(group=primary_treatment))+
+  labs(x="Secondary Dose", y= "CV", color= "Primary Treatment")+
+  facet_wrap(~primary_treatment)
 ```
 
