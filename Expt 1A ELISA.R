@@ -1633,5 +1633,35 @@ ggplot(data = m.ab %>% filter(elisa_od != 0), aes(x = dpi, y = elisa_od, color =
   facet_wrap(~secondary_dose)
 
 
+#Random Effects Qs
+glm.bn <- glmmTMB(elisa_od ~ 1 + (1|band_number), data=p.ab, family=Gamma())
+glm.dpi <- glmmTMB(elisa_od ~1 + (1|dpi), data=p.ab, family=Gamma())
+glm.both <- glmmTMB(elisa_od ~ 1 + (1|band_number)+(1|dpi), data=p.ab, family=Gamma())
+summary(glm.bn)
+summary(glm.dpi)
+summary(glm.both)
+hist(resid(glm.bn))
 
+hist(abs(resid(glm.bn)))
+hist(abs(resid(glm.dpi)))
 
+ggplot(s.ab, aes(x=dpi, y=resid))+
+  geom_point()
+
+ggplot(s.ab, aes(x=dpi, y=residresid))+
+  geom_point()
+
+ggplot(l.ab, aes(x=dpi, y=resid))+
+  geom_point()
+
+simple_glm <- glmer(elisa_od ~ dpi + (1|band_number), data=p.ab, family=Gamma())
+
+library(merTools)
+predictInterval(simple_glm)
+REsim(simple_glm)
+plotREsim(REsim(simple_glm))
+
+p<-predict(simple_glm, re.form=NA)
+p
+
+glm_m <- lmer(elisa_od ~ dpi + (1 + dpi | band_number), data=p.ab)
