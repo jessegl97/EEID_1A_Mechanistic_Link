@@ -189,6 +189,7 @@ print(missing_combinations)
 ggplot(m.ab, aes(x=dpi, y=elisa_od, color=primary_treatment))+
   geom_point()+
   geom_hline(yintercept = 0.061)+
+  scale_color_manual(values=pri_colors)+
   geom_smooth(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5)+
   facet_wrap(~primary_treatment)
 unique(m.ab$dpi)
