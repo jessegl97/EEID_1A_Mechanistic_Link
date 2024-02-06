@@ -1207,6 +1207,8 @@ ggplot(elisa41%>% filter(infected.d56 != "NA"), aes(y=infected.d56, x=elisa_od))
   xlim(c(0.04, 0.13))+
   facet_wrap(~secondary_treatment)
 
+
+
 ggplot(elisa41, aes(x=elisa_od, y=infected.d56, color = as.factor(primary_dose)))+
   geom_point()+
   geom_line(data = dat.new, aes(x = elisa_od, y = yhat, color = primary_treatment)) 
