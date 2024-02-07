@@ -84,7 +84,7 @@ ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
 
 
 #who has an eye score but no path load? 2451
-m.ab%>%
+m.ab%>% 
   filter(dpi < 42 & infected_prim == 0 & tes == 2.5)
 
 m.ab%>%
