@@ -893,12 +893,19 @@ summary(elisa41)
 #take all data where the band number from elisa41 match band number from quant56
 #returns new column with missing points as NA
 elisa41$quantity_dpi_56 <- quant56$quantity[match(elisa41$band_number,quant56$band_number)]
+elisa41$tes_dpi_56 <- quant56$tes[match(elisa41$band_number,quant56$band_number)]
 elisa41$dpi.check <- quant56$dpi[match(elisa41$band_number,quant56$band_number)] #check band numbers to see if match works
 elisa41$dpi.check.no <- quant56$band_number[match(elisa41$band_number,quant56$band_number)] #check band numbers to see if match works
 #elisa41$infected.d56 <-quant56$infected[match(elisa41$band_number,quant56$band_number)] #add variable specifying infection d56
 
 elisa41$threshold_cutoff = 50
 
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(elisa_od_41 = elisa_od[dpi==41])
+
+ggplot(m.ab, aes(x=elisa_od, y=elisa_od_41, color=as.factor(dpi)))+
+  geom_point()
 
 elisa41 <- elisa41 %>%
   mutate(infected.d56 = ifelse(quantity_dpi_56>threshold_cutoff, 1, 0))
@@ -1030,6 +1037,79 @@ ggplot(elisa41, aes(x=elisa_od, y=infected.d56, color = as.factor(primary_dose))
   facet_wrap(~primary_treatment)
 unique(m.ab$primary_treatment)
 ```
+```{r Do Antibodies on day 41 protect from Pathology day 56?, warning=FALSE}
+#sum of eye scores secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number)%>%
+  mutate(sec_ses = sum(tes[dpi>41], na.rm =TRUE))
+m.ab
+
+ggplot(m.ab, aes(x=tes, y=sec_ses, color=as.factor(dpi)))+
+  geom_point()
+
+ggplot(m.ab %>%filter(dpi>41), aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_jitter()+
+  geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
+  scale_color_manual(values=sec_colors)+
+  facet_wrap(~primary_treatment)
+
+ggplot(m.ab, aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_jitter(height=0)+
+  geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
+  scale_color_manual(values=sec_colors)+
+  labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
+
+
+ggplot(m.ab %>% filter(dpi >41), aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_jitter(height=0)+
+  geom_smooth(aes(groups = band_number), span=0.5, size=0.5)+
+  scale_color_manual(values=sec_colors)+
+  labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
+
+#do antibody levels on day 41 predict sum of eye scores post secondary infection when controlling for secondary dose?
+lm5 <- glm(sec_ses ~ elisa_od_41 + primary_treatment*secondary_dose, data=m.ab)
+summary(lm5)
+plot(allEffects(lm5))
+resid <- simulateResiduals(lm5)
+plot(resid)
+
+dat.new=expand.grid(sec_ses=unique(m.ab$sec_ses),
+                    secondary_dose=unique(m.ab$secondary_dose),
+                    primary_treatment=unique(m.ab$primary_treatment),
+                    elisa_od_41=unique(m.ab$elisa_od_41),
+                    band_number=unique(m.ab$band_number))#new grid to put predictions into
+dat.new$yhat = predict(lm5, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+unique(dat.new$band_number)
+
+ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=as.factor(secondary_dose)))+
+  geom_point(aes(color=as.factor(secondary_dose)), shape=1, size = 2, stroke=1)+
+  geom_line(data = dat.new, aes(x = elisa_od_41, y = yhat, groups=as.factor(secondary_dose))) +
+  labs(x="ELISA OD Day 41", y="Sum of Eye Score: Secondary Infection", color = "Secondary Dose")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~primary_treatment)
+
+ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=fct_rev(primary_treatment)))+
+  geom_point(aes(color=fct_rev(primary_treatment)), shape=1, size = 2, stroke=1)+
+  geom_line(data = dat.new, aes(x = elisa_od_41, y = yhat, groups=primary_treatment)) +
+  labs(x="ELISA OD Day 41", y="Sum of Eye Score: Secondary Infection", color = "Primiary Treatment")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~secondary_dose, ncol=5)
+
+
+```
+```{r secondary disease duration}
+diseased_duration_sec <- m.ab %>%
+  filter(dpi>41)%>%
+  group_by(band_number, primary_treatment, sex) %>%
+  summarize(diseased_duration = ifelse(sum(diseased == 1) == 0, 0, last(dpi[diseased == 1] + 1) - first(dpi[diseased == 1])))
+
+ggplot(diseased_duration_sec, aes(x=diseased_duration))+
+  geom_histogram(aes(fill=fct_rev(primary_treatment)), position="dodge", bins = 20)+
+  labs(title = "Duration of Pathology: Secondary Infection", x="Duration of Pathology", y="Count", fill="Primary Treatment")
+```
 
 
 CV Secondary Inoculation
@@ -1042,10 +1122,15 @@ s.cv <- m.ab %>%
   summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
             bird_sd = sd(elisa_od))
 
-ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_cv, color=fct_rev(primary_treatment)))+ 
+ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_cv, color=as.factor(secondary_dose)))+ 
   geom_point(size=2)+
-  geom_path(aes(group=primary_treatment))+
-  labs(x="Secondary Dose", y= "CV", color= "Primary Treatment")+
+  scale_color_manual(values=sec_colors)+
+  #geom_path(aes(group=primary_treatment))+
+  labs(x="Secondary Dose", y= "CV", color= "Secondary Dose")+
   facet_wrap(~primary_treatment)
+```
+Are antibody levels prior to infection protective?
+```{r}
+
 ```
 

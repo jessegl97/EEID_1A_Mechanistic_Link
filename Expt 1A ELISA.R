@@ -82,6 +82,7 @@ ggplot(m.ab %>% filter(dpi < 42), aes(x=tes, y=tes, color=band_number))+
   geom_jitter(height=0.1)+
   facet_wrap(~infected_prim)
 
+
 #who has an eye score but no path load? 2451
 m.ab%>%
   filter(dpi < 42 & infected_prim == 0 & tes == 2.5)
