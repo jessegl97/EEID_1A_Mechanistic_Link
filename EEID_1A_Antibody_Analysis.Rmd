@@ -79,7 +79,7 @@ m.ab <- m.ab %>%
 Format Graphs
 ```{r}
 #set color scheme primary treatment
-pri_colors <- c("#F8766D", "#00BA38", "#619CFF")
+pri_colors <- c("#619CFF", "#00BA38", "#F8766D")
 #set color scheme secondary treatment
 sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
 sec_default <- c( "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#F8766D")
@@ -443,6 +443,44 @@ emm_results <- emmeans(prdc1, specs = "primary_dose_group")
 pairs(emm_results)
 
 ```
+Variation in antibody levels on day 14 may be a better predictor of host susceptibility 
+```{r Proportion Seroconverted day 14}
+#what proportion of birds seroconverted by day 14?
+#proportion seropositive
+m.abs<- m.ab %>%
+  filter(dpi %in% c(-8, 14, 41))%>%
+  group_by(dpi, primary_treatment, sex)%>%
+  summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
+            n_seropos = sum(seropos == 1, na.rm=TRUE),
+            n_seroneg = sum(seropos == 0, na.rm=TRUE),
+            total_birds = sum(n_seropos, n_seroneg))
+m.abs
+
+ggplot(m.abs, aes(x=dpi, y=prop_seropos, color=primary_treatment))+
+  geom_point(size = 3)+
+  scale_color_manual(values = pri_colors)+
+  labs(x = "Day Post Infection", y = "Proportion Seropositive", color= "Primary Treatment") 
+
+ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = primary_treatment)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Day post-infection (dpi)", y = "Proportion of seropositive birds") +
+  theme_minimal()
+
+```
+Change in antibody levels from baseline to day 14
+```{r}
+m.abb <- m.ab %>%
+  filter(dpi %in% c(-8, 14)) %>%
+  group_by(band_number, primary_treatment)%>%
+  mutate(ab_change = elisa_od[dpi == 14] - elisa_od[dpi == -8], na.rm=T)
+m.abb
+
+ggplot(m.abb %>% filter(dpi == 14), aes(x=primary_treatment, y=ab_change, color=fct_rev(primary_treatment)))+
+  geom_jitter(width=0.25, height=0)+
+  labs(x="Day Post Infection", y="Change in Antibody Levels", color="Primary Treatment", title = "Change in Antibody Levels: Day 14 - Baseline")
+```
+
+
 Antibody levels return to baseline in the low (p = 0.149), but not high dose (p < 0.001) groups by day 41.
 ```{r Antibody levels on day 41 post infection were sig different between groups, fig.height=6, fig.width=10}
 lm3 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi==41), family=Gamma())
@@ -853,6 +891,13 @@ m.cv <- p.ab %>%
             bird_sd = sd(elisa_od),
             bird_pv = PV(elisa_od))
 
+e.cv <- p.ab %>% 
+  group_by(dpi, primary_treatment)%>%
+  summarise(bird_cv = sd(tes.new)/mean(tes.new),
+            bird_sd = sd(tes.new),
+            bird_pv = PV(tes.new))
+p.ab$tes.new <- p.ab$tes +1
+
 pv <- ggplot(m.cv, aes(x=dpi, y=bird_pv))+
   geom_point(aes(color=fct_rev(primary_treatment)))
 
@@ -865,6 +910,15 @@ ggplot(m.cv, aes(x=bird_pv, y=bird_cv, color=fct_rev(primary_treatment)))+
 print(pv + cv)
 pv
 cv
+```
+```{r}
+bird.pv <- p.ab %>% 
+  group_by(bird_ID, primary_treatment)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od),
+            bird_pv = PV(elisa_od))
+
+
 ```
 
 Does prior exposure induce heterogeneity in immune responses just prior to reinfection?
@@ -1098,10 +1152,11 @@ ggplot(m.ab %>%filter(dpi>41), aes(x=dpi, y=tes, color=as.factor(secondary_dose)
   scale_color_manual(values=sec_colors)+
   facet_wrap(~primary_treatment)
 
-ggplot(m.ab, aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+ggplot(m.ab, aes(x=dpi, y=tes, color=fct_rev(primary_treatment)))+
   geom_jitter(height=0)+
-  geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
-  scale_color_manual(values=sec_colors)+
+  geom_line(aes(groups = band_number))+
+  #geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
+  scale_color_manual(values=pri_colors)+
   labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
 
 
