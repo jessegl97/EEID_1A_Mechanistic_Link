@@ -2,7 +2,7 @@
 title: "EEID 1A Antibody Analysis"
 author: "Jesse Garrett-Larsen"
 date: "2024-01-26"
-output: 
+output: fe
   html_document: 
     keep_md: yes
 ---
@@ -190,6 +190,25 @@ ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_
   scale_color_manual(values = pri_colors)+
   labs(x="Days Post Infection", y="Antibody Levels", color="Primary Treatment")+
   facet_wrap(~primary_treatment)
+
+ggplot(m.ab %>% filter(dpi <= 41), aes(x=dpi, y=elisa_od, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  geom_path(aes(x=dpi, y=elisa_od, group=band_number), alpha=0.5, size=0.5)+
+  scale_color_manual(values = pri_colors)+
+  labs(x="Days Post Infection", y="Antibody Levels", color="Primary Treatment")
+
+plot <- m.ab %>%
+  filter(dpi %in% c(-8, 14, 41))
+ggplot(plot, aes(x = dpi, y = elisa_od, color = fct_rev(primary_treatment))) +
+  geom_point() +
+  geom_hline(yintercept = 0.061, linetype="dashed") +
+  geom_line(aes(group=band_number), alpha = 0.5, size = 0.5) +
+  stat_summary(aes(group=primary_treatment), geom="line", fun="mean", alpha=1, size=0.5, color="black")+
+  stat_summary(aes(group=primary_treatment), geom="line", fun="mean", alpha=0.5)+
+  scale_color_manual(values = pri_colors) +
+  labs(x = "Days Post Infection", y = "Antibody Levels", color = "Primary Treatment")
+str(m.ab)
 ```
 Duration of disease based off of eye score during primary infection
 ```{r}
@@ -297,13 +316,15 @@ pairs(emm_r)
 Using primary_treatment (categorical), I show that birds inoculated with MG produce antibodies in a dose-dependent manner.
 
 Across all days primary infection, inoculation dose 
-```{r All days}
+```{r All days, fig.height=6, fig.width=10}
 lm1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
 summary(lm1)
 
 l1r <- simulateResiduals(lm1)
 plot(l1r)
 
+lm2 <- glmmTMB(elisa_od~primary_dose + (1|band_number), data=p.ab, family=Gamma())
+summary(lm2)
 #model comparison 
 p1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
 p2<- glmmTMB(elisa_od~primary_treatment + sex + (1|band_number), data=p.ab, family=Gamma())
@@ -319,20 +340,19 @@ pairs(emm_results)
 #antibodies across all days primary infection
 ggplot(data=p.ab, aes(x=dpi, y= elisa_od, shape=primary_treatment,
                       color=fct_rev(primary_treatment)))+
-  geom_jitter(width=5, size=1.5)+
-  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)))+
-  geom_hline(yintercept = 0.061, linetype="dashed")+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="line")+
-  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2, stroke=1.5)+
-  #             fun.min = function(x) mean(x)-sd(x),
-  #             fun.max = function(x) mean(x)+sd(x),
-  #             geom= "errorbar", size=.75, width=2)+
-  labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.5)+
+  geom_point(size=1.5)+
+  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)), alpha=0.3)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", color="black", size=0.5, alpha=1)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.5, size=1)+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=1.5, stroke=1.5, color="black")+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=0.5)+
+    labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
        x= "Days Post Infection", shape="Primary Treatment", color="Primary Treatment")+
   guides(shape=FALSE)
 ```
 
-```{r Antibody levels on day 14 post infection were sig different between groups}
+```{r Antibody levels on day 14 post infection were sig different between groups, fig.height=6, fig.width=10}
 #Final Model
 lm2 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
 summary(lm2)
@@ -424,7 +444,7 @@ pairs(emm_results)
 
 ```
 Antibody levels return to baseline in the low (p = 0.149), but not high dose (p < 0.001) groups by day 41.
-```{r Antibody levels on day 41 post infection were sig different between groups}
+```{r Antibody levels on day 41 post infection were sig different between groups, fig.height=6, fig.width=10}
 lm3 <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi==41), family=Gamma())
 summary(lm3)
 
@@ -512,7 +532,7 @@ pairs(emm_results)
 ```
 
 Does prior exposure induce heterogeneity in antibody levels?####
-```{r Does prior exposure induce heterogeneity in antibody levels?}
+```{r Does prior exposure induce heterogeneity in antibody levels?, fig.height=6, fig.width=10}
 p.ab <- p.ab %>%
   filter(dpi !=56)
 #subset antibodies by groups to look at their variance
@@ -821,6 +841,31 @@ ggplot(m.cv.s, aes(x=dpi, y=bird_cv, color=fct_rev(primary_treatment)))+
   facet_wrap(~sex)
 
 ```
+Proportional Variability
+```{r Proportional Variability}
+#install.packages("remotes")
+remotes::install_github("T-Engel/CValternatives")
+library(CValternatives)
+library(patchwork)
+m.cv <- p.ab %>% 
+  group_by(dpi, primary_treatment)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od),
+            bird_pv = PV(elisa_od))
+
+pv <- ggplot(m.cv, aes(x=dpi, y=bird_pv))+
+  geom_point(aes(color=fct_rev(primary_treatment)))
+
+cv <- ggplot(m.cv, aes(x=dpi, y=bird_cv))+
+  geom_point(aes(color=fct_rev(primary_treatment)))
+
+ggplot(m.cv, aes(x=bird_pv, y=bird_cv, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_path()
+print(pv + cv)
+pv
+cv
+```
 
 Does prior exposure induce heterogeneity in immune responses just prior to reinfection?
 Prior exposure to different doses of MG induces both higher overall antibody levels just prior to infection (p < 0.0001), and more variable antibody levels.
@@ -1025,7 +1070,7 @@ head(dat.new)
 
 ggplot(elisa41%>% filter(infected.d56 != "NA"), aes(y=infected.d56, x=elisa_od))+
   geom_point((aes(color=fct_rev(as.factor(infected.d56)))), shape=1, size = 3)+
-  geom_point(data = dat.new, aes(x = elisa_od, y = yhat, color=as.factor(secondary_dose))) +
+  #geom_point(data = dat.new, aes(x = elisa_od, y = yhat, color=as.factor(secondary_dose))) +
   labs(x="ELISA OD Day 41", y="Infection Status Day 56", color = "Infection Status Day 56")+
   geom_vline(xintercept=0.061, linetype="dashed", alpha=0.3)+
   xlim(c(0.04, 0.13))+
@@ -1033,7 +1078,7 @@ ggplot(elisa41%>% filter(infected.d56 != "NA"), aes(y=infected.d56, x=elisa_od))
 
 ggplot(elisa41, aes(x=elisa_od, y=infected.d56, color = as.factor(primary_dose)))+
   geom_point()+
-  geom_smooth(data = dat.new, aes(x = elisa_od, y = yhat, color = primary_treatment))+
+#  geom_smooth(data = dat.new, aes(x = elisa_od, y = yhat, color = primary_treatment))+
   facet_wrap(~primary_treatment)
 unique(m.ab$primary_treatment)
 ```
@@ -1065,7 +1110,10 @@ ggplot(m.ab %>% filter(dpi >41), aes(x=dpi, y=tes, color=as.factor(secondary_dos
   geom_smooth(aes(groups = band_number), span=0.5, size=0.5)+
   scale_color_manual(values=sec_colors)+
   labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
+```
 
+
+```{r Do Antibodies on day 41 protect from Pathology day 56?, warning=FALSE}
 #do antibody levels on day 41 predict sum of eye scores post secondary infection when controlling for secondary dose?
 lm5 <- glm(sec_ses ~ elisa_od_41 + primary_treatment*secondary_dose, data=m.ab)
 summary(lm5)
@@ -1127,6 +1175,19 @@ ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_cv, color
   scale_color_manual(values=sec_colors)+
   #geom_path(aes(group=primary_treatment))+
   labs(x="Secondary Dose", y= "CV", color= "Secondary Dose")+
+  facet_wrap(~primary_treatment)
+
+s.cv <- m.ab %>% 
+  group_by(dpi, primary_treatment, secondary_dose)%>%
+  summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od),
+            bird_pv = PV(elisa_od))
+
+ggplot(s.cv%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=bird_pv, color=as.factor(secondary_dose)))+ 
+  geom_point(size=2)+
+  scale_color_manual(values=sec_colors)+
+  #geom_path(aes(group=primary_treatment))+
+  labs(x="Secondary Dose", y= "PV", color= "Secondary Dose")+
   facet_wrap(~primary_treatment)
 ```
 Are antibody levels prior to infection protective?
