@@ -2,9 +2,10 @@
 title: "EEID 1A Antibody Analysis"
 author: "Jesse Garrett-Larsen"
 date: "2024-01-26"
-output: fe
+fig_width: 10 
+fig_height: 6
+output: 
   html_document: 
-    keep_md: yes
 ---
 
 Load packages
@@ -117,13 +118,20 @@ m.ab <- m.ab %>%
   ungroup()
 
 #generate seropositivity data; if elisa OD > 0.061 = seropositive
-#1 = bird seroconverted at any point during the priming phase of the experiment
+#can become seropos or not at any point
 m.ab <- m.ab %>%
   mutate(seropos = ifelse(elisa_od>seropos_cutoff, 1, 0))
 
+#Seropos at any time during the priming phase
 m.ab <- m.ab %>%
   group_by(band_number) %>%
-  mutate(ever_seropos = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  mutate(seropos_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#Seropos at any time during the secondary phase
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(seropos_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
   ungroup()
 
 #generate eye score data; if eye score > 0 = diseased
@@ -134,7 +142,13 @@ m.ab <- m.ab %>%
 #ever diseased during primary infection
 m.ab <- m.ab %>%
   group_by(band_number) %>%
-  mutate(ever_diseased = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
+  mutate(diseased_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#ever diseased during secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(diseased_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
   ungroup()
 
 #Rules for infection: We defined a bird as infected if it had eye score >= 0.5, pathogen load > 15 copies, or both
@@ -146,6 +160,16 @@ m.ab <- m.ab %>%
   group_by(band_number) %>%
   mutate(inf_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(inf, 0) == 1), 1, 0)) %>%
   ungroup()
+
+#ever inf during secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(inf_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(inf, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+ggplot(m.ab%>% filter(dpi > 41), aes(x=dpi, y=tes, color=primary_treatment))+
+  geom_jitter(height=0)+
+  facet_wrap(~seropos_prim~primary_treatment)
 
 ```
 
@@ -421,8 +445,8 @@ dat.new2 <- data.frame(primary_dose = seq(min(p.ab$primary_dose), max(p.ab$prima
 dat.new2$yhat <- predict(prd1, type = "response", interval = "confidence", level = 0.95, newdata = dat.new2)
 
 #plot continuous predicted values over raw data
-pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od))+
-  geom_jitter(size=2, width=0.5, shape = 1)+
+pid14.dose.pred.c <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_dose, y=elisa_od, color=primary_treatment))+
+  geom_jitter(size=2, width=0.5, aes(shape=as.factor(primary_dose)))+
   geom_line(data=dat.new2, aes(x=primary_dose, y=yhat), color="brown")+#model predictions
   labs(x="Primary Dose", y="Antibody Levels", shape="Primary Dose")
 
@@ -449,17 +473,18 @@ Variation in antibody levels on day 14 may be a better predictor of host suscept
 #proportion seropositive
 m.abs<- m.ab %>%
   filter(dpi %in% c(-8, 14, 41))%>%
-  group_by(dpi, primary_treatment, sex)%>%
+  group_by(dpi, primary_treatment)%>%
   summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
             n_seropos = sum(seropos == 1, na.rm=TRUE),
             n_seroneg = sum(seropos == 0, na.rm=TRUE),
             total_birds = sum(n_seropos, n_seroneg))
 m.abs
 
-ggplot(m.abs, aes(x=dpi, y=prop_seropos, color=primary_treatment))+
+ggplot(m.abs, aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
   geom_point(size = 3)+
   scale_color_manual(values = pri_colors)+
-  labs(x = "Day Post Infection", y = "Proportion Seropositive", color= "Primary Treatment") 
+  labs(x = "Day Post Infection", y = "Proportion Seropositive", color = "Primary Treatment", shape = "Primary Treatment")#+
+  guides(shape = FALSE)
 
 ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = primary_treatment)) +
   geom_bar(stat = "identity", position = "dodge") +
@@ -467,6 +492,79 @@ ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = primary_treatment
   theme_minimal()
 
 ```
+If birds seroconverted, were they protected from secondary pathology?
+```{r}
+#does seropositivity on day 14 after primary infection predict whether or not a bird will develop pathology upon secondary infection?
+m.ab1 <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(seropos_14 = ifelse(any(coalesce(dpi, 0) == 14 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+lm.sp <- glm(diseased_sec ~ seropos_14 + primary_treatment*secondary_dose, data=m.ab1, family="binomial")
+
+summary(lm.sp)
+plot(allEffects(lm.sp))
+
+resid <- simulateResiduals(lm.sp)
+plot(resid)
+
+lm.spa <- glm(diseased_sec ~ seropos_prim + primary_dose*secondary_dose, data=m.ab1, family="binomial")
+summary(lm.spa)
+plot(allEffects(lm.spa))
+
+
+dat.new=expand.grid(secondary_dose=unique(m.ab1$secondary_dose),
+                    primary_treatment=unique(m.ab1$primary_treatment),
+                    diseased_sec=unique(m.ab1$diseased_sec),
+                    seropos_14=unique(m.ab1$seropos_14))#new grid to put predictions into
+dat.new$yhat = predict(lm.sp, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+
+ggplot(m.ab1, aes(x=diseased_sec, y=as.factor(seropos_14)))+
+  geom_count(aes(size=after_stat(n)))+
+  geom_jitter(size=1, height=0)+
+  geom_point(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose), shape=as.factor(secondary_dose))) +
+  #geom_path(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose)))+
+  labs(x="Disease During Secondary Infection", y="Antibodies During Primary Infection", color = "Secondary Dose", shape = "Secondary Dose")+
+  facet_grid(~primary_treatment)
+
+
+
+
+ggplot(m.ab1, aes(y=diseased_sec, x=as.factor(seropos_14)))+
+  #geom_count(aes(size=after_stat(prop)))+
+  geom_jitter(size=1, height=0)+
+  geom_point(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose), shape=as.factor(secondary_dose))) +
+  #geom_path(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose)))+
+  labs(x="Disease During Secondary Infection", y="Antibodies During Primary Infection", color = "Secondary Dose", shape = "Secondary Dose")+
+  facet_grid(~primary_treatment)
+
+
+plot <- m.ab %>%
+  filter(dpi %in% c(-8, 14, 41, 56))
+ggplot(plot, aes(y=elisa_od, x=dpi, color=fct_rev(primary_treatment)))+
+  geom_point(shape = "-")+
+  geom_line(aes(groups=as.factor(band_number)))+
+  geom_hline(yintercept = 0.061)
+
+#tes over all experiment
+ggplot(m.ab, aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  stat_smooth(aes(x=dpi, y=tes, group=band_number), alpha=0.5, size=0.5, span=1, se=FALSE)+
+  scale_color_manual(values = sec_colors)+
+  labs(x="Days Post Infection", y="TES", color="Secondary Dose")+
+  facet_grid(~primary_treatment~diseased_sec)
+
+#install.packages("vcd")
+library(vcd)
+#mosaic plot
+mosaic(~primary_treatment + secondary_treatment + seropos_prim + diseased_sec, data=m.ab1,
+       highlighting = "primary_treatment", highlighting_fill = pri_colors)
+
+```
+
+
 Change in antibody levels from baseline to day 14
 ```{r}
 m.abb <- m.ab %>%
@@ -967,22 +1065,24 @@ ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, colo
   labs(title = "Antibody Levels Post-Secondary Infection", y= "Antibody Levels", x="Secondary Dose", color="Secondary Dose", shape="Secondary Dose")+
   facet_wrap(~primary_treatment)
 
+
+
 ```
 
 ```{r Format ELISA 41 vs 56 comparison}
 m.ab1<-m.ab %>%
-  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, ever_seropos, diseased, ever_diseased,
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
                 primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes) #make new df with just relevant variables
 
 
 elisa41 <- m.ab %>%
   filter(dpi == 41 & band_number != 2375)%>% #dpi 41 for elisa
-  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, ever_seropos, diseased, ever_diseased,
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
                 primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes) #df with only elisa od, band number, dpi from 41
 
 quant56 <- m.ab %>%
   filter(dpi == 56 & band_number != 2375)%>% #dpi 56 only for path load; drop 2375 because there was no elisa for it on dpi 41
- dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, ever_seropos, diseased, ever_diseased,
+ dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
                 primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes)#df with only quantity, band number, dpi from d56
 
 summary(quant56)
