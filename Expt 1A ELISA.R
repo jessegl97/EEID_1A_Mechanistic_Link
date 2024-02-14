@@ -175,6 +175,33 @@ any(is.na(m.ab$dpi))
 m.ab <- m.ab %>%
   filter(experiment_location == "vt") #include only birds at VT
 
+ggplot(m.ab.inf, aes(y=diseased_sec, x=inf_prim))+
+  geom_jitter(size=1, height=0, width=0.5, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =inf_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = inf_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(x="Infection Status During Primary Infection", y="Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  facet_grid(~secondary_dose)
+
+ggplot(m.ab1, aes(y=diseased_sec, x=inf_prim))+
+  geom_jitter(size=1, height=0, width=0.25, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =inf_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = inf_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(title = "Infection Primary vs Disease Secondary", x="Infection Status During Primary Infection", y="Relative Likelihood of Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  scale_linetype_manual(values = c("solid", "dashed", "dotted"))+
+  facet_grid(~secondary_dose~primary_treatment)
+
+ggplot(m.ab1, aes(y=diseased_sec, x=seropos_prim))+
+  geom_jitter(size=1, height=0, width=0.25, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =seropos_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = seropos_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(title = "Seropositivity Primary vs Disease Secondary", x="Seropositivity During Primary Infection", y="Relative Likelihood of Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  facet_grid(~secondary_dose~primary_treatment)
 
 # Check for missing combinations of band_number and dpi
 missing_combinations <- expand.grid(band_number = unique(m.ab$band_number), dpi = unique(m.ab$dpi))

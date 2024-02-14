@@ -486,60 +486,49 @@ ggplot(m.abs, aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_
   labs(x = "Day Post Infection", y = "Proportion Seropositive", color = "Primary Treatment", shape = "Primary Treatment")#+
   guides(shape = FALSE)
 
-ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = primary_treatment)) +
+ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = fct_rev(primary_treatment))) +
   geom_bar(stat = "identity", position = "dodge") +
-  labs(x = "Day post-infection (dpi)", y = "Proportion of seropositive birds") +
+  labs(x = "Day post-infection (dpi)", y = "Proportion of Birds Seropositive") +
   theme_minimal()
 
 ```
 If birds seroconverted, were they protected from secondary pathology?
-```{r}
-#does seropositivity on day 14 after primary infection predict whether or not a bird will develop pathology upon secondary infection?
-m.ab1 <- m.ab %>%
-  group_by(band_number) %>%
-  mutate(seropos_14 = ifelse(any(coalesce(dpi, 0) == 14 & coalesce(seropos, 0) == 1), 1, 0)) %>%
-  ungroup()
+```{r What portion of protection is from antibodies}
+#does seropositivity during primary infection predict whether or not a bird will develop pathology upon secondary infection?
+lm.sp1 <- glm(diseased_sec ~ seropos_prim + primary_treatment*secondary_dose, data=m.ab1, family=binomial(link= "logit"))
+summary(lm.sp1)
+plot(allEffects(lm.sp1))
 
-lm.sp <- glm(diseased_sec ~ seropos_14 + primary_treatment*secondary_dose, data=m.ab1, family="binomial")
-
-summary(lm.sp)
-plot(allEffects(lm.sp))
-
-resid <- simulateResiduals(lm.sp)
-plot(resid)
-
-lm.spa <- glm(diseased_sec ~ seropos_prim + primary_dose*secondary_dose, data=m.ab1, family="binomial")
-summary(lm.spa)
-plot(allEffects(lm.spa))
-
+emm_results<- emmeans(lm.sp1, ~ primary_treatment*secondary_dose)
+pairs(emm_results)
 
 dat.new=expand.grid(secondary_dose=unique(m.ab1$secondary_dose),
                     primary_treatment=unique(m.ab1$primary_treatment),
                     diseased_sec=unique(m.ab1$diseased_sec),
-                    seropos_14=unique(m.ab1$seropos_14))#new grid to put predictions into
-dat.new$yhat = predict(lm.sp, type="response", newdata=dat.new, re.form=NA) #predicted values
+                    seropos_prim=unique(m.ab1$seropos_prim))#new grid to put predictions into
+dat.new$yhat = predict(lm.sp1, type="response", newdata=dat.new, re.form=NA) #predicted values
 head(dat.new)
 
-ggplot(m.ab1, aes(x=diseased_sec, y=as.factor(seropos_14)))+
-  geom_count(aes(size=after_stat(n)))+
-  geom_jitter(size=1, height=0)+
-  geom_point(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose), shape=as.factor(secondary_dose))) +
-  #geom_path(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose)))+
-  labs(x="Disease During Secondary Infection", y="Antibodies During Primary Infection", color = "Secondary Dose", shape = "Secondary Dose")+
-  facet_grid(~primary_treatment)
+ggplot(m.ab1, aes(y=diseased_sec, x=seropos_prim))+
+  geom_jitter(size=1, height=0, width=0.5, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =seropos_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = seropos_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(x="Seropositivity During Primary Infection", y="Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  facet_grid(~secondary_dose)
 
+#install.packages("vcd")
+library(vcd)
+#mosaic plot
+mosaic(~primary_treatment + secondary_treatment + seropos_prim + diseased_sec, data=m.ab1,
+       highlighting = "primary_treatment", highlighting_fill = pri_colors)
 
+mplot<-mosaic(~primary_treatment + secondary_treatment + seropos_prim + diseased_sec, data=m.ab1,
+       highlighting = "secondary_treatment", highlighting_fill = sec_colors)
 
-
-ggplot(m.ab1, aes(y=diseased_sec, x=as.factor(seropos_14)))+
-  #geom_count(aes(size=after_stat(prop)))+
-  geom_jitter(size=1, height=0)+
-  geom_point(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose), shape=as.factor(secondary_dose))) +
-  #geom_path(data = dat.new, aes(x = as.factor(seropos_14), y = yhat, color=as.factor(secondary_dose)))+
-  labs(x="Disease During Secondary Infection", y="Antibodies During Primary Infection", color = "Secondary Dose", shape = "Secondary Dose")+
-  facet_grid(~primary_treatment)
-
-
+```
+```{r warning=FALSE}
 plot <- m.ab %>%
   filter(dpi %in% c(-8, 14, 41, 56))
 ggplot(plot, aes(y=elisa_od, x=dpi, color=fct_rev(primary_treatment)))+
@@ -551,19 +540,90 @@ ggplot(plot, aes(y=elisa_od, x=dpi, color=fct_rev(primary_treatment)))+
 ggplot(m.ab, aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
   geom_point()+
   geom_hline(yintercept = 0.061)+
-  stat_smooth(aes(x=dpi, y=tes, group=band_number), alpha=0.5, size=0.5, span=1, se=FALSE)+
+  stat_smooth(aes(x=dpi, y=tes, group=band_number), alpha=0.5, size=0.5, span=0.5, se=FALSE)+
   scale_color_manual(values = sec_colors)+
-  labs(x="Days Post Infection", y="TES", color="Secondary Dose")+
-  facet_grid(~primary_treatment~diseased_sec)
+  labs(title = "TES - x = diseased sec, y = infected prim",x="Days Post Infection", y="TES", color="Secondary Dose")+
+  facet_grid(~primary_treatment~diseased_sec~inf_prim)
 
-#install.packages("vcd")
-library(vcd)
-#mosaic plot
-mosaic(~primary_treatment + secondary_treatment + seropos_prim + diseased_sec, data=m.ab1,
-       highlighting = "primary_treatment", highlighting_fill = pri_colors)
+#tes over all experiment
+ggplot(m.ab, aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  stat_smooth(aes(x=dpi, y=tes, group=band_number), alpha=0.5, size=0.5, span=0.5, se=FALSE)+
+  scale_color_manual(values = sec_colors)+
+  labs(title = "TES",x="Days Post Infection", y="TES", color="Secondary Dose")+
+  facet_grid(~secondary_dose~primary_treatment)
+
+#path load over all experiment
+ggplot(m.ab, aes(x=dpi, y=log10_quantity1, color=as.factor(secondary_dose)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  stat_smooth(aes(x=dpi, y=log10_quantity1, group=band_number), alpha=0.5, size=0.5, span=0.5, se=FALSE)+
+  scale_color_manual(values = sec_colors)+
+  labs(title = "Path load - x = diseased sec, y = infected prim", x="Days Post Infection", y="Log10(quantity+1)", color="Secondary Dose")+
+  facet_grid(~primary_treatment~diseased_sec~inf_prim)
+
+#path load
+ggplot(m.ab, aes(x=dpi, y=log10_quantity1, color=as.factor(secondary_dose)))+
+  geom_point()+
+  geom_hline(yintercept = 0.061)+
+  stat_smooth(aes(x=dpi, y=tes, group=band_number), alpha=0.5, size=0.5, span=.75, se=FALSE)+
+  scale_color_manual(values = sec_colors)+
+  labs(title = "log10(quantity+1)",x="Days Post Infection", y="TES", color="Secondary Dose")+
+  facet_grid(~secondary_dose~primary_treatment)
+```
+
+
+```{r}
+#does being infected during primary infeciton predict whether a bird will develop pathology upon secondary infection?
+m.ab.inf <- m.ab1# %>%
+#  filter(primary_treatment != "Sham")
+lm.inf <- glm(diseased_sec ~ inf_prim + primary_treatment*secondary_dose, data=m.ab.inf, family=binomial(link="logit"))
+summary(lm.inf)
+plot(allEffects(lm.inf))
+
+dat.new=expand.grid(secondary_dose=unique(m.ab.inf$secondary_dose),
+                    primary_treatment=unique(m.ab.inf$primary_treatment),
+                    diseased_sec=unique(m.ab.inf$diseased_sec),
+                    inf_prim=unique(m.ab.inf$inf_prim))#new grid to put predictions into
+dat.new$yhat = predict(lm.inf, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+
+ggplot(m.ab.inf, aes(y=diseased_sec, x=inf_prim))+
+  geom_jitter(size=1, height=0, width=0.5, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =inf_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = inf_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(x="Infection Status During Primary Infection", y="Relative Likelihood of Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  facet_grid(~secondary_dose)
 
 ```
 
+```{r}
+#does being infected during primary infeciton predict whether a bird will develop pathology upon secondary infection?
+m.ab.inf <- m.ab1# %>%
+#  filter(primary_treatment != "Sham")
+lm.inf <- glm(inf_sec ~ inf_prim + seropos_prim + primary_treatment*secondary_dose, data=m.ab.inf, family=binomial(link="logit"))
+summary(lm.inf)
+plot(allEffects(lm.inf))
+
+dat.new=expand.grid(secondary_dose=unique(m.ab.inf$secondary_dose),
+                    primary_treatment=unique(m.ab.inf$primary_treatment),
+                    diseased_sec=unique(m.ab.inf$diseased_sec),
+                    inf_prim=unique(m.ab.inf$inf_prim))#new grid to put predictions into
+dat.new$yhat = predict(lm.inf, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+
+ggplot(m.ab.inf, aes(y=diseased_sec, x=inf_prim))+
+  geom_jitter(size=1, height=0, width=0.5, aes(shape=primary_treatment))+
+  geom_point(data = dat.new, aes(x =inf_prim, y = yhat, color=as.factor(secondary_dose), shape = fct_rev(primary_treatment))) +
+  geom_path(data = dat.new, aes(x = inf_prim, y = yhat, color=as.factor(secondary_dose), linetype = fct_rev(primary_treatment)))+
+  labs(x="Infection Status During Primary Infection", y="Relative Likelihood of Disease During Secondary Infection", color = "Secondary Dose", shape = "Primary Treatment", linetype = "Primary Treatment")+
+  scale_x_continuous(breaks = c(0, 1), labels = c("N", "Y"))+
+  scale_y_continuous(breaks = c(0,1), labels = c("N", "Y"))+
+  facet_grid(~secondary_dose)
+```
 
 Change in antibody levels from baseline to day 14
 ```{r}
