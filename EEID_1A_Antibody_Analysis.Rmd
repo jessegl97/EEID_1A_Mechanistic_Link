@@ -468,28 +468,136 @@ pairs(emm_results)
 
 ```
 Variation in antibody levels on day 14 may be a better predictor of host susceptibility 
-```{r Proportion Seroconverted day 14}
+```{r Proportion Seroconverted  vs Infected day 14}
 #what proportion of birds seroconverted by day 14?
+library(gt)
+
+library(gtExtras)
 #proportion seropositive
 m.abs<- m.ab %>%
-  filter(dpi %in% c(-8, 14, 41))%>%
+  filter(dpi %in% c(-8, 7, 14, 41))%>%
   group_by(dpi, primary_treatment)%>%
   summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
             n_seropos = sum(seropos == 1, na.rm=TRUE),
             n_seroneg = sum(seropos == 0, na.rm=TRUE),
-            total_birds = sum(n_seropos, n_seroneg))
+            prop_inf = sum(inf == 1, na.rm=TRUE)/ n(),
+            n_inf = sum(inf == 1, na.rm=TRUE),
+            n_not_inf = sum(inf == 0, na.rm=TRUE),
+            seropos_prim = sum(seropos_prim == 1, na.rm=TRUE),
+            inf_prim = sum(inf_prim == 1, na.rm=TRUE),
+            total_birds =n())
 m.abs
 
+table_gt <- m.abs %>%
+  gt() %>%
+  fmt_number(
+    columns=vars(prop_seropos, prop_inf),
+    decimals = 2
+  )%>%
+  tab_header(
+    title = "Summary Table",
+    subtitle = "Summary of Proportion Seropositive and Infected by Treatment Group"
+  ) %>%
+  cols_label(
+    dpi = "Day Post Infection",
+    primary_treatment = "Primary Treatment",
+    prop_seropos = "Proportion Seropositive",
+    n_seropos = "Number Seropositive",
+    n_seroneg = "Number Seronegative",
+    prop_inf = "Proportion Infected",
+    n_inf = "Number Infected",
+    n_not_inf = "Number Not Infected",
+    seropos_prim = "Seropositive Primary",
+    inf_prim = "Infected Primary",
+    total_birds = "Total Birds"
+  )
+
+# Display the table
+table_gt
+
+
+#proportion seropositive
 ggplot(m.abs, aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
-  geom_point(size = 3)+
+  geom_point(size = 1)+
   scale_color_manual(values = pri_colors)+
-  labs(x = "Day Post Infection", y = "Proportion Seropositive", color = "Primary Treatment", shape = "Primary Treatment")#+
+  ylim(c(0,1))+
+  geom_text(aes(label = round(prop_seropos, 2)), vjust = -0.25, size = 3) +
+  labs(title= "Proportion Seropositive", x = "Day Post Infection", y = "Proportion Seropositive", color = "Primary Treatment", shape = "Primary Treatment")#+
   guides(shape = FALSE)
 
-ggplot(m.abs, aes(x = as.factor(dpi), y = prop_seropos, fill = fct_rev(primary_treatment))) +
-  geom_bar(stat = "identity", position = "dodge") +
-  labs(x = "Day post-infection (dpi)", y = "Proportion of Birds Seropositive") +
-  theme_minimal()
+  m.abs<- m.ab %>%
+  filter(dpi <= 41) %>%
+  group_by(dpi, primary_treatment)%>%
+  summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
+            n_seropos = sum(seropos == 1, na.rm=TRUE),
+            n_seroneg = sum(seropos == 0, na.rm=TRUE),
+            prop_inf = sum(inf == 1, na.rm=TRUE)/ n(),
+            n_inf = sum(inf == 1, na.rm=TRUE),
+            n_not_inf = sum(inf == 0, na.rm=TRUE),
+            seropos_prim = sum(seropos_prim == 1, na.rm=TRUE),
+            inf_prim = sum(inf_prim == 1, na.rm=TRUE),
+            total_birds =n())
+#proportion infected
+ggplot(m.abs, aes(x=dpi, y=prop_inf, color=primary_treatment, shape=primary_treatment))+
+  geom_point(size = 1)+
+  scale_color_manual(values = pri_colors)+
+  ylim(c(0,1))+
+  geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")#+
+  guides(shape = FALSE)
+
+  m.aball<- m.ab %>%
+  group_by(dpi, primary_treatment, secondary_treatment)%>%
+  summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
+            n_seropos = sum(seropos == 1, na.rm=TRUE),
+            n_seroneg = sum(seropos == 0, na.rm=TRUE),
+            prop_inf = sum(inf == 1, na.rm=TRUE)/ n(),
+            n_inf = sum(inf == 1, na.rm=TRUE),
+            n_not_inf = sum(inf == 0, na.rm=TRUE),
+            seropos_prim = sum(seropos_prim == 1, na.rm=TRUE),
+            inf_prim = sum(inf_prim == 1, na.rm=TRUE),
+            total_birds =n())
+
+table <- m.aball %>%
+  gt() %>%
+  tab_header(
+    title = "Summary of Bird Data",
+    subtitle = "Grouped by DPI, Primary Treatment, and Secondary Treatment"
+  ) %>%
+  fmt_number(
+    columns = vars(prop_seropos, prop_inf),
+    decimals = 2
+  ) %>%
+  cols_label(
+    dpi = "Day Post Infection",
+    primary_treatment = "Primary Treatment",
+    secondary_treatment = "Secondary Treatment",
+    prop_seropos = "Proportion Seropositive",
+    n_seropos = "Number of Seropositive Birds",
+    n_seroneg = "Number of Seronegative Birds",
+    prop_inf = "Proportion Infected",
+    n_inf = "Number of Infected Birds",
+    n_not_inf = "Number of Non-Infected Birds",
+    seropos_prim = "Number of Seropositive Primary Infections",
+    inf_prim = "Number of Infected Primary Infections",
+    total_birds = "Total Number of Birds"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = vars(prop_seropos, prop_inf)
+  )
+
+# Displaying the table
+table
+#proportion infected
+ggplot(m.aball, aes(x=dpi, y=prop_inf, color=primary_treatment, shape=primary_treatment))+
+  geom_point(size = 1)+
+  scale_color_manual(values = pri_colors)+
+  geom_line()+
+  ylim(c(0,1))+
+  geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")#+
+  guides(shape = FALSE)
 
 ```
 If birds seroconverted, were they protected from secondary pathology?
@@ -600,8 +708,8 @@ ggplot(m.ab.inf, aes(y=diseased_sec, x=inf_prim))+
 
 ```
 
-```{r}
-#does being infected during primary infeciton predict whether a bird will develop pathology upon secondary infection?
+```{r }
+#does being infected during primary infection predict whether a bird will develop pathology upon secondary infection?
 m.ab.inf <- m.ab1# %>%
 #  filter(primary_treatment != "Sham")
 lm.inf <- glm(inf_sec ~ inf_prim + seropos_prim + primary_treatment*secondary_dose, data=m.ab.inf, family=binomial(link="logit"))
