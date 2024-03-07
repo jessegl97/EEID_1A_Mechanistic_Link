@@ -1,0 +1,151 @@
+---
+title: "EEID_1A_Antibody_Figures"
+author: "Jesse Garrett-Larsen"
+date: "2024-03-07"
+output: html_document
+---
+## Format Data
+
+Load packages
+```{r Load Packages}
+rm(list=ls())
+library(tidyverse)
+library(dplyr)
+library(glmmTMB)
+library(effects)
+library(AICcmodavg)
+library(emmeans)
+library(multcomp)
+library(DHARMa)
+```
+
+```{r Read in Cleaned Data, warning=FALSE}
+source("dataCleaning_EEID1A.R")
+```
+
+
+Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
+```{r Thresholds}
+m.ab$threshold_cutoff = 50
+m.ab$seropos_cutoff = 0.061
+m.ab$pathology_cutoff = 0
+```
+
+Generate new infected and seroconversion columns based off of cutoffs
+```{r Infection + Seroconversion + Eye Score}
+#generate infected column - if copy number > 50, infected.
+#for each timepoint only - can become infected or uninfected at next timepoint
+m.ab <- m.ab %>%
+  mutate(infected = ifelse(quantity>threshold_cutoff, 1, 0))
+
+#generate infection data; if path load > 50 copies = infected
+#1 = bird was successfully infected at any point during the priming phase of the experiment
+#coalesce function replaces any NA with 0 here. 
+#To be conservative, I am always assuming there is no path load unless it's measured with qPCR
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(infected_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate infection data; if path load > 50 copies any time after secondary infection -> 1
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate (infected_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(infected, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate seropositivity data; if elisa OD > 0.061 = seropositive
+#can become seropos or not at any point
+m.ab <- m.ab %>%
+  mutate(seropos = ifelse(elisa_od>seropos_cutoff, 1, 0))
+
+#Seropos at any time during the priming phase
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(seropos_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#Seropos at any time during the secondary phase
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(seropos_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(seropos, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#generate eye score data; if eye score > 0 = diseased
+#1 = bird had an eye score at that time point
+m.ab <- m.ab %>%
+  mutate(diseased = ifelse(tes>pathology_cutoff, 1, 0))
+
+#ever diseased during primary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(diseased_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#ever diseased during secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(diseased_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(diseased, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#Rules for infection: We defined a bird as infected if it had eye score > 0, pathogen load > 50 copies, or both
+m.ab <- m.ab %>%
+  mutate(inf = ifelse((coalesce(quantity, 0) > threshold_cutoff | coalesce(tes, 0) > pathology_cutoff), 1, 0))
+
+#ever inf during primary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(inf_prim = ifelse(any(coalesce(dpi, 0) < 42 & coalesce(inf, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+#ever inf during secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(inf_sec = ifelse(any(coalesce(dpi, 0) > 42 & coalesce(inf, 0) == 1), 1, 0)) %>%
+  ungroup()
+
+```
+
+####Does Inoculation Dose Predict Antibody Levels?####
+-----
+```{r New df p.ab for primary }
+#data frame with only primary infection (no PID 56)
+p.ab <- m.ab %>%
+  filter(dpi <=41)
+```
+
+```{r Baseline antibody levels were not significantly different}
+lm0 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+summary(lm0)
+
+emm_r <- emmeans(lm0, ~primary_treatment)
+pairs(emm_r)
+```
+
+```{r Antibody levels across primary infection were significantly different}
+lm1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
+summary(lm1)
+print("ANOVA")
+car::Anova(lm1, type = "III")
+l1r <- simulateResiduals(lm1)
+plot(l1r)
+
+means <- as.data.frame(cld(emmeans(lm1, ~primary_treatment, adjust = "sidak")))
+
+ggplot(means, aes(x = primary_treatment, y = emmean, color = primary_treatment))+
+  geom_point()
+
+#antibodies across all days primary infection
+ggplot(data=p.ab, aes(x=dpi, y= elisa_od, shape=primary_treatment,
+                      color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.5)+
+  geom_point(size=1.5)+
+  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)), alpha=0.3)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", color="black", size=0.5, alpha=1)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.5, size=1)+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=1.5, stroke=1.5, color="black")+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=0.5)+
+    labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
+       x= "Days Post Infection", shape="Primary Treatment", color="Primary Treatment")+
+  guides(shape=FALSE)
+```
+

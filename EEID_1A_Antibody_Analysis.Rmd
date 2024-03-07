@@ -360,7 +360,7 @@ Across all days primary infection, inoculation dose
 ```{r All days, fig.height=6, fig.width=10}
 lm1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
 summary(lm1)
-
+car::Anova(lm1, type = "III")
 l1r <- simulateResiduals(lm1)
 plot(l1r)
 
@@ -375,6 +375,7 @@ aictab(cand.set=list(p1, p2, p3, p4, p5), modnames=c("p1","p2", "p3", "p4", "p5"
 
 emm_results <- emmeans(lm1, ~ primary_treatment, scale="response")
 pairs(emm_results)
+
 
 #antibodies across all days primary infection
 ggplot(data=p.ab, aes(x=dpi, y= elisa_od, shape=primary_treatment,
