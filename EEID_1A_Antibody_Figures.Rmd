@@ -124,28 +124,205 @@ pairs(emm_r)
 ```{r Antibody levels across primary infection were significantly different}
 lm1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
 summary(lm1)
-print("ANOVA")
+
 car::Anova(lm1, type = "III")
 l1r <- simulateResiduals(lm1)
 plot(l1r)
 
-means <- as.data.frame(cld(emmeans(lm1, ~primary_treatment, adjust = "sidak")))
+# Create a new factor variable based on primary_dose
+p.ab <- p.ab %>% mutate(primary_dose_group = cut(primary_dose, breaks = c(-Inf, 100, 2000, Inf), labels = c("Sham", "Low", "High")))
 
-ggplot(means, aes(x = primary_treatment, y = emmean, color = primary_treatment))+
-  geom_point()
+# Fit glm with  new factor variable
+lm1means <- glmmTMB(elisa_od~primary_dose_group + (1|band_number), data=p.ab, family=Gamma())
+car::Anova(lm1means, type = "III")
+# Calculate estimated marginal means (EMMs)
+emm_results <- emmeans(lm1means, specs = "primary_dose_group")
+
+# Conduct pairwise comparisons between the groups
+pairs(emm_results)
+
 
 #antibodies across all days primary infection
-ggplot(data=p.ab, aes(x=dpi, y= elisa_od, shape=primary_treatment,
+ggplot(data=p.ab%>% filter(dpi %in% c(-8, 14, 41)), aes(x=dpi, y= elisa_od, 
                       color=fct_rev(primary_treatment)))+
-  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.5)+
-  geom_point(size=1.5)+
-  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)), alpha=0.3)+
+  #geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.5)+
+  geom_jitter(size=1.5, alpha=0.5, height=0, width=0.5)+
+  geom_line(aes(x=dpi, y=elisa_od, group = as.factor(band_number)), alpha=0.1)+
   stat_summary(aes(group=primary_treatment), fun=mean, geom="line", color="black", size=0.5, alpha=1)+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.5, size=1)+
-  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=1.5, stroke=1.5, color="black")+
-  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=0.5)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.75, size=1.5)+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=1)+
+  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=1.5, stroke=1.5, color="black", alpha =0.5)+
     labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
        x= "Days Post Infection", shape="Primary Treatment", color="Primary Treatment")+
-  guides(shape=FALSE)
+  guides(shape=FALSE)+
+  theme_minimal()
+```
+
+```{r Proportion Seropositive or Infected}
+#proportion seropositive, infected
+m.abs<- m.ab %>%
+  filter(dpi %in% c(-8, 7, 14, 41))%>%
+  group_by(dpi, primary_treatment)%>%
+  summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(),
+            n_seropos = sum(seropos == 1, na.rm=TRUE),
+            n_seroneg = sum(seropos == 0, na.rm=TRUE),
+            prop_inf = sum(inf == 1, na.rm=TRUE)/ n(),
+            n_inf = sum(inf == 1, na.rm=TRUE),
+            n_not_inf = sum(inf == 0),
+            seropos_prim = sum(seropos_prim == 1, na.rm=TRUE),
+            inf_prim = sum(inf_prim == 1, na.rm=TRUE),
+            total_birds =n())
+
+#better table format
+table_gt <- m.abs %>%
+  gt() %>%
+  fmt_number(
+    columns=vars(prop_seropos, prop_inf),
+    decimals = 2
+  )%>%
+  tab_header(
+    title = "Summary Table",
+    subtitle = "Summary of Proportion Seropositive and Infected by Treatment Group"
+  ) %>%
+  cols_label(
+    dpi = "Day Post Infection",
+    primary_treatment = "Primary Treatment",
+    prop_seropos = "Proportion Seropositive",
+    n_seropos = "Number Seropositive",
+    n_seroneg = "Number Seronegative",
+    prop_inf = "Proportion Infected",
+    n_inf = "Number Infected",
+    n_not_inf = "Number Not Infected",
+    seropos_prim = "Seropositive Primary",
+    inf_prim = "Infected Primary",
+    total_birds = "Total Birds",
+  )
+
+table_gt
+
+#proportion seropositive primary
+ggplot(m.abs %>% filter(dpi %in% c(-8, 14, 41)), aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
+  geom_point(size = 1)+
+  scale_color_manual(values = pri_colors)+
+  ylim(c(0,1))+
+  geom_text(aes(label = round(prop_seropos, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Seropositive", x = "Day Post Infection", y = "Proportion Seropositive", color = "Primary Treatment", shape = "Primary Treatment")
+
+#proportion infected primary
+ggplot(m.abs, aes(x=dpi, y=prop_inf, color=primary_treatment, shape=primary_treatment))+
+  geom_point(size = 1)+
+  scale_color_manual(values = pri_colors)+
+  ylim(c(0,1))+
+  #geom_text(aes(label = paste(n_inf, "/", total_birds)), vjust = -0.2, size = 3) +
+  geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")
+```
+
+```{r change from baseline to day 14}
+
+# Simplify data set so pivot_wider works
+m.ab.w <- m.ab %>% select(dpi, band_number, primary_treatment, secondary_dose,
+                          sex, elisa_od)%>%
+  filter(dpi %in% c(-8, 14, 41))
+
+wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
+                                names_glue = "{.value}_{dpi}",
+                                values_from = elisa_od)
+
+wibird$elisa_od_pre <- wibird$`elisa_od_-8`
+wibird <- wibird %>% mutate(elisa_diff = abs(elisa_od_pre - elisa_od_14))
+wibird <- wibird %>% mutate(totalTES = sum())
+
+# m.abb <- m.ab %>%
+#   filter(dpi %in% c(-8, 14)) %>%
+#   group_by(band_number, primary_treatment)%>%
+#   mutate(ab_change = elisa_od[dpi == 14] - elisa_od[dpi == -8], na.rm=T)
+# m.abb
+
+ggplot(wibird, aes(x=primary_treatment, y=elisa_diff, color=primary_treatment, shape = primary_treatment))+
+  geom_jitter(width=0.25, height=0)+
+  scale_color_manual(values = c(pri_colors))+
+  labs(x="Day Post Infection", y="Change in Antibody Levels", color="Primary Treatment", shape = "Primary Treatment", title = "Change in Antibody Levels: Day 14 - Baseline")
+hist(wibird$elisa_diff)
+wibird$elisa_diff1 <- wibird$elisa_diff + 0.00001
+lm.change <- glm(elisa_diff1 ~ primary_treatment, data=wibird, family=Gamma())
+summary(lm.change)
+resid <- simulateResiduals(lm.change)
+plot(resid)
+plot(allEffects(lm.change))
+
+emm_results<- emmeans(lm.change, ~ primary_treatment)
+pairs(emm_results)
+
+
+```
+```{r Does change in antibody level to day 14 predict total eye score of secondary infection}
+
+#calculate total eye score for primary and secondary 
+m.ab1 <- m.ab%>% select(dpi, band_number, primary_treatment, secondary_dose, elisa_od, tes, sex, quantity) %>%
+  group_by(band_number)%>%
+  mutate(totalTES_pri = sum(tes[dpi %in% c(7, 14, 21, 28, 35, 41)]),
+         totalTES_sec = sum(tes[dpi %in% c(46, 49, 56, 63)]))%>%
+  ungroup()
+
+
+# Simplify data set so pivot_wider works
+m.ab.w2 <- m.ab1 %>% select(dpi, band_number, primary_treatment, secondary_dose,
+                          elisa_od, totalTES_pri, totalTES_sec)
+
+wibird2 <- m.ab.w2 %>% 
+  filter(dpi %in% c(-8, 14, 41, 56))%>%
+  pivot_wider(names_from = dpi,
+                                names_glue = "{.value}_{dpi}",
+                                values_from = elisa_od)
+
+# wibird2 <- wibird2 %>%
+#   mutate(across(starts_with("elisa_od_"), ~unlist(.)))
+
+wibird2$elisa_od_pre <- wibird2$`elisa_od_-8`
+wibird2 <- wibird2 %>% mutate(elisa_diff = abs(elisa_od_pre - elisa_od_14)+0.0001)
+
+lm.change <- glm(ceiling(totalTES_sec) ~ elisa_diff + primary_treatment*secondary_dose, data=wibird2, family=poisson())
+lm.14 <- glm(ceiling(totalTES_sec) ~ elisa_od_14 + primary_treatment*secondary_dose, data=wibird2, family=poisson())
+
+simulateResiduals(lm.14, plot=T)
+summary(lm.change)
+summary(lm.14)
+car::Anova(lm.14, type="III")
+car::Anova(lm.change, type = "III")
+
+emm_results=emmeans(lm.change, ~secondary_dose)
+pairs(emm_results)
+
+
+dat.new=expand.grid(secondary_dose=unique(wibird2$secondary_dose),
+                    primary_treatment=unique(wibird2$primary_treatment),
+                    totalTES_sec=unique(wibird2$totalTES_sec),
+                    elisa_diff=unique(wibird2$elisa_diff))#new grid to put predictions into
+dat.new$yhat = predict(lm.change, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+
+ggplot(wibird2, aes(x=elisa_diff, y=ceiling(totalTES_sec), color=fct_rev(primary_treatment)))+
+  geom_point()+
+  #geom_line(dat.new, aes(x=elisa_diff, y=yhat))+
+  facet_wrap(~as.factor(secondary_dose), ncol=5)
+
+ggplot(wibird2, aes(x=totalTES_pri, y=totalTES_sec, color=fct_rev(primary_treatment)))+
+  geom_jitter()
+  #geom_line(dat.new, aes(x=elisa_diff, y=yhat))+
+  #facet_wrap(~as.factor(secondary_dose), ncol=5)
+
+```
+
+```{r Is variability in total pathology predicted by antibody levels?}
+wibird3 <- m.ab %>%
+  select
+
+m.ab.w3 <- m.ab1
+
+wibird3 <- m.ab.w3 %>% 
+  pivot_wider(names_from = dpi,
+                                names_glue = "{.value}_{dpi}",
+                                values_from = elisa_od)
 ```
 

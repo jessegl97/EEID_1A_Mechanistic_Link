@@ -565,7 +565,7 @@ ggplot(m.ab.p, aes(x=dpi, y=prop_inf, color=primary_treatment, shape=primary_tre
   labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")
 
 #proportion seropositive primary
-ggplot(m.ab.p, aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
+ggplot(m.abs %>% filter(dpi %in% c(-8, 14, 41)), aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
   geom_point(size = 1)+
   scale_color_manual(values = pri_colors)+
   ylim(c(0,1))+
@@ -587,28 +587,48 @@ m.ab.inf<- m.ab %>%
             total_birds =n(), na.rm=TRUE)
 
 #proportion infected
-ggplot(m.ab.inf, aes(x=dpi, y=prop_inf, color=as.factor(secondary_dose), shape=primary_treatment, groups=secondary_dose))+
+ggplot(m.ab.inf %>% filter(dpi > 41), aes(x=dpi, y=prop_inf, color=as.factor(secondary_dose), shape=primary_treatment, groups=secondary_dose))+
   geom_point(size = 1)+
   scale_color_manual(values = sec_colors)+
   geom_path(aes(linetype=fct_rev(primary_treatment)))+
   ylim(c(0,1))+
   geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
-  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")
+  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")+
+  facet_grid(~primary_treatment)
 
+#infected secondary
+m.ab.sec<- m.ab %>%
+  filter(dpi %in% c(46, 49, 56, 63)) %>%
+  group_by(primary_treatment, secondary_dose)%>%
+  summarise(prop_seropos = sum(seropos == 1, na.rm=TRUE) / n(), na.rm=TRUE,
+            n_seropos = sum(seropos == 1, na.rm=TRUE),
+            n_seroneg = sum(seropos == 0, na.rm=TRUE),
+            prop_inf = sum(inf == 1, na.rm=TRUE)/ n(), na.rm=TRUE,
+            n_inf = sum(inf == 1, na.rm=TRUE),
+            n_not_inf = sum(inf == 0, na.rm=TRUE),
+            seropos_prim = sum(seropos_prim == 1, na.rm=TRUE),
+            inf_prim = sum(inf_prim == 1, na.rm=TRUE),
+            total_birds =n(), na.rm=TRUE)
 
-
-
+#proportion infected secondary
+ggplot(m.ab.sec, aes(x=log(secondary_dose), y=prop_inf, color=as.factor(secondary_dose), shape=primary_treatment, groups=secondary_dose))+
+  geom_point(size = 1)+
+  scale_color_manual(values = sec_colors)+
+  ylim(c(0,1))+
+  geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Infected", x = "log10(secondary dose)", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")+
+  facet_grid(~primary_treatment)
 ```
 If birds seroconverted, were they protected from secondary pathology?
 ```{r If birds seroconverted, were they protected from secondary pathology?}
 #does seropositivity during primary infection predict whether or not a bird will develop pathology upon secondary infection?
-lm.sp1 <- glm(diseased_sec ~ seropos_prim + primary_treatment*secondary_dose, data=m.ab, family=binomial(link= "logit"))
+lm.sp1 <- glm(inf_sec ~ elisa_od + primary_treatment*secondary_dose, data=m.ab %>% filter(dpi == 14), family=binomial(link= "logit"))
 summary(lm.sp1)
 plot(allEffects(lm.sp1))
-
+car::Anova(lm.sp1, type="III")
 emm_results<- emmeans(lm.sp1, ~ primary_treatment*secondary_dose)
 pairs(emm_results)
-
+simulateResiduals(lm.sp1, plot=T)
 dat.new=expand.grid(secondary_dose=unique(m.ab$secondary_dose),
                     primary_treatment=unique(m.ab$primary_treatment),
                     diseased_sec=unique(m.ab$diseased_sec),
