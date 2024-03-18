@@ -80,7 +80,8 @@ m.ab <- m.ab %>%
 Format Graphs
 ```{r}
 #set color scheme primary treatment
-pri_colors <- c("#619CFF", "#00BA38", "#F8766D")
+#pri_colors <- c("#619CFF", "#00BA38", "#F8766D")
+pri_colors <- c("#D95F02", "#7570B3", "#1B9E77")
 #set color scheme secondary treatment
 sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
 sec_default <- c( "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#F8766D")
@@ -91,7 +92,7 @@ def_colors <- c("#F8766D", "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#7A76A6"
 
 Generate Threshold Cutoffs for Pathogen Load and Antibody Levels
 ```{r Thresholds}
-m.ab$threshold_cutoff = 50
+m.ab$threshold_cutoff = 15
 m.ab$seropos_cutoff = 0.061
 m.ab$pathology_cutoff = 0
 ```
@@ -244,15 +245,16 @@ plot <- m.ab %>%
 ggplot(plot, aes(x = dpi, y = elisa_od, color = fct_rev(primary_treatment))) +
   geom_point() +
   geom_hline(yintercept = 0.061, linetype="dashed") +
-  geom_line(aes(group=band_number), alpha = 0.5, size = 0.5) +
+  geom_line(aes(group=band_number), alpha = 0.1, size = 0.5) +
   stat_summary(aes(group=primary_treatment), geom="line", fun="mean", alpha=1, size=0.5, color="black")+
-  stat_summary(aes(group=primary_treatment), geom="line", fun="mean", alpha=0.5)+
+  stat_summary(aes(group=primary_treatment), geom="line", fun="mean", alpha=0.75, size=1)+
   scale_color_manual(values = pri_colors) +
-  labs(x = "Days Post Infection", y = "Antibody Levels", color = "Primary Treatment")
+  labs(x = "Days Post Infection", y = "Antibody Levels", color = "Primary Treatment")+
+  theme_minimal()
 str(m.ab)
 ```
 Duration of disease based off of eye score during primary infection
-```{r}
+```{r primary disease duration}
 m.ab$dpi <- as.numeric(m.ab$dpi)
 d.ab <- m.ab %>%
   filter(dpi < 42 & dpi > 0) %>%
@@ -428,13 +430,15 @@ dat.new$yhat = predict(lm2, type="response", newdata=dat.new, re.form=NA) #predi
 head(dat.new)
 
 #graph showing antibody levels on day 14 post-infection with model predictions
-pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y=elisa_od, shape=primary_treatment, color=fct_rev(primary_treatment)))+
+pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y=elisa_od, color=fct_rev(primary_treatment)))+
   geom_jitter(size=2, width=0.25)+
-  geom_point(data=dat.new, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown")+#model predictions
-  scale_shape_manual(values = c(16, 17, 15))+
+  geom_point(data=dat.new, aes(x=primary_treatment, y=yhat), size=10, shape="-", color="brown")+#model predictions
+  #scale_shape_manual(values = c(16, 17, 15))+
+  scale_color_manual(values = c(pri_colors))+
   geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
-  labs(title="MG Antibodies Day 14", x="Primary Treatment", y="Antibody Levels", color="Primary Treatment")+
-  guides(shape=FALSE)
+  labs(x="Primary Treatment", y="Antibody Levels", color="Primary Treatment")+
+  guides(shape=FALSE)+
+  theme_minimal()
 
 pid14.pred
 
@@ -560,9 +564,9 @@ ggplot(m.ab.p, aes(x=dpi, y=prop_inf, color=primary_treatment, shape=primary_tre
   geom_point(size = 1)+
   scale_color_manual(values = pri_colors)+
   ylim(c(0,1))+
-  geom_text(aes(label = paste(n_inf, "/", total_birds)), vjust = -0.2, size = 3) +
-  #geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
-  labs(title = "Proportion Infected", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")
+  #geom_text(aes(label = paste(n_inf, "/", total_birds)), vjust = -0.2, size = 3) +
+  geom_text(aes(label = round(prop_inf, 2)), vjust = -0.2, size = 3) +
+  labs(title = "Proportion Infected Primary", x = "Day Post Infection", y = "Proportion Infected", color = "Primary Treatment", shape = "Primary Treatment")
 
 #proportion seropositive primary
 ggplot(m.abs %>% filter(dpi %in% c(-8, 14, 41)), aes(x=dpi, y=prop_seropos, color=primary_treatment, shape=primary_treatment))+
@@ -632,7 +636,8 @@ simulateResiduals(lm.sp1, plot=T)
 dat.new=expand.grid(secondary_dose=unique(m.ab$secondary_dose),
                     primary_treatment=unique(m.ab$primary_treatment),
                     diseased_sec=unique(m.ab$diseased_sec),
-                    seropos_prim=unique(m.ab$seropos_prim))#new grid to put predictions into
+                    seropos_prim=unique(m.ab$seropos_prim),
+                    elisa_od = unique(m.ab$elisa_od))#new grid to put predictions into
 dat.new$yhat = predict(lm.sp1, type="response", newdata=dat.new, re.form=NA) #predicted values
 head(dat.new)
 
@@ -890,12 +895,15 @@ dat.newer$yhat = predict(lm3, type="response", newdata=dat.newer, re.form=NA) #p
 head(dat.newer)
 
 #plot predicted values over raw data
-pid41.pred <- ggplot(data = m.ab %>% filter(dpi == 41), aes(x = primary_treatment, y = elisa_od, shape = primary_treatment, color=fct_rev(primary_treatment))) +
+pid41.pred <- ggplot(data = m.ab %>% filter(dpi == 41), aes(x = primary_treatment, y = elisa_od, color=fct_rev(primary_treatment))) +
   geom_jitter(size=1.5, width = 0.25) +
   geom_hline(yintercept = 0.061, color = "black", alpha = 0.75, linetype='dashed') +
-  labs(title="MG Antibodies Day 41", x="Inoculation Dose", y= "MG Antibodies OD", color = "Primary Treatment")+
+  labs(x="Inoculation Dose", y= "Antibody Levels", color = "Primary Treatment")+
   geom_point(data=dat.newer, aes(x=primary_treatment, y=yhat, shape=primary_treatment), size=10, shape="-", color="brown4")+#model predictions
-  guides(shape=FALSE)
+  scale_color_manual(values = c(pri_colors))+
+  guides(shape=FALSE)+
+  ylim(c(0.04, 0.19))+
+  theme_minimal()
 
 pid41.pred
 ```
@@ -1199,6 +1207,7 @@ ggplot(p.ab%>% filter(dpi != -8), aes(x=elisa_od, fill=fct_rev(primary_treatment
 #Histogram showing mean
 ggplot(p.ab%>% filter(dpi != -8), aes(x=elisa_od, fill=fct_rev(primary_treatment)))+
   geom_histogram(binwidth = 0.005, position="identity", alpha=2, color="black", size=0.35)+
+  geom_density(alpha=0.25)+
   geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
   xlim(c(0.04, 0.19))+
   geom_vline(data = p.ab%>% filter(dpi != -8), aes(xintercept = groupmean.dpi, color = "red"), linetype = "dotted",alpha = 1, show.legend=FALSE) +
@@ -1289,6 +1298,15 @@ pv <- ggplot(m.cv, aes(x=dpi, y=bird_pv))+
 cv <- ggplot(m.cv, aes(x=dpi, y=bird_cv))+
   geom_point(aes(color=fct_rev(primary_treatment)))
 
+ggplot(m.cv, aes(x=dpi, y=bird_pv))+
+  geom_point(aes(color=fct_rev(primary_treatment), alpha = "PV"), size=3)+
+  geom_point(aes(x=dpi, y=bird_cv, color=fct_rev(primary_treatment), alpha = "CV"), size=3)+
+  geom_line(aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)))+
+  scale_alpha_manual(values = c(0.5,1))+
+  scale_color_manual(values = c(pri_colors))+
+  labs(x="Days Post Primary Inoculation", y="Variability Metric", color="Primary Treatment", alpha = "Variability Metric")+
+  theme_minimal()
+
 ggplot(m.cv, aes(x=bird_pv, y=bird_cv, color=fct_rev(primary_treatment)))+
   geom_point()+
   geom_path()
@@ -1352,8 +1370,15 @@ ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, colo
   labs(title = "Antibody Levels Post-Secondary Infection", y= "Antibody Levels", x="Secondary Dose", color="Secondary Dose", shape="Secondary Dose")+
   facet_wrap(~primary_treatment)
 
+#birds that had MG primary then sham secondary to look at "waning" antibody levels
+mg.sham <- m.ab %>%
+  filter(secondary_dose == "0")
 
+mg.sham
 
+ggplot(mg.sham%>% filter(dpi %in% c(-8, 14, 41, 56)), aes(x=dpi, y=elisa_od, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_line(aes(group=band_number))
 ```
 
 ```{r Format ELISA 41 vs 56 comparison}
@@ -1593,12 +1618,13 @@ ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=fct_rev(p
 ```{r secondary disease duration}
 diseased_duration_sec <- m.ab %>%
   filter(dpi>41)%>%
-  group_by(band_number, primary_treatment, sex) %>%
+  group_by(band_number, primary_treatment, secondary_dose, sex) %>%
   summarize(diseased_duration = ifelse(sum(diseased == 1) == 0, 0, last(dpi[diseased == 1] + 1) - first(dpi[diseased == 1])))
 
 ggplot(diseased_duration_sec, aes(x=diseased_duration))+
   geom_histogram(aes(fill=fct_rev(primary_treatment)), position="dodge", bins = 20)+
-  labs(title = "Duration of Pathology: Secondary Infection", x="Duration of Pathology", y="Count", fill="Primary Treatment")
+  labs(title = "Duration of Pathology: Secondary Infection", x="Duration of Pathology", y="Count", fill="Primary Treatment")+
+  facet_wrap(~secondary_dose, ncol=1)
 ```
 
 
