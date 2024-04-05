@@ -49,13 +49,6 @@ m.ab <- m.ab %>%
 m.ab <- m.ab %>%
   filter(experiment_location == "vt") #include only birds at VT
 
-#set color scheme primary treatment
-pri_colors <- c("#619CFF", "#00BA38", "#F8766D")
-#set color scheme secondary treatment
-sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
-sec_default <- c( "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#F8766D")
-def_colors <- c("#F8766D", "#00BA38", "#619CFF", "#F564E3", "#BA00FF", "#7A76A6")
-
 #omit 2505 from data set for analysis as it was positive at quarantine
 m.ab <- m.ab %>%
   filter(band_number != 2505)
