@@ -4,6 +4,37 @@
 library(gt)
 
 library(gtExtras)
+
+
+```{r Inverse vs Log Link}
+#pre-infection
+lm0a <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+lm0b <- glm(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma(log))
+
+aictab(cand.set=list(lm0a, lm0b), modnames=c("inv","log"))
+#no difference between the two
+
+#Across all infection
+ps1 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma())
+ps2 <- glmmTMB(elisa_od~primary_treatment + (1|band_number), data=p.ab, family=Gamma(log))
+
+aictab(cand.set=list(ps1, ps2), modnames=c("inv","log"))
+#inverse link function is slightly better
+
+#DPI 14
+p1a <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==14), family=Gamma())
+p2a <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==14), family=Gamma(log))
+
+aictab(cand.set=list(p1a, p2a), modnames=c("inv","log"))
+#no difference 
+
+#DPI 41
+p1b <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==41), family=Gamma())
+p2b <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi ==41), family=Gamma(log))
+
+aictab(cand.set=list(p1b, p2b), modnames=c("inv","log"))
+#no difference
+```
 #proportion seropositive
 m.abs<- m.ab %>%
   filter(dpi %in% c(-8, 7, 14, 41))%>%
@@ -461,4 +492,342 @@ summary(lm2)
 ggplot(ab.41, aes(x=primary_treatment, y=resid))+
   geom_point()+
   theme_bw()
+```
+
+Change in antibody levels from baseline to day 14
+```{r change from baseline to day 14}
+m.abb <- m.ab %>%
+  filter(dpi %in% c(-8, 14)) %>%
+  group_by(band_number, primary_treatment)%>%
+  mutate(ab_change = elisa_od[dpi == 14] - elisa_od[dpi == -8], na.rm=T)
+m.abb
+
+ggplot(m.abb %>% filter(dpi == 14), aes(x=primary_treatment, y=ab_change, color=primary_treatment, shape = primary_treatment))+
+  geom_jitter(width=0.25, height=0)+
+  scale_color_manual(values = c(pri_colors))+
+  labs(x="Day Post Infection", y="Change in Antibody Levels", color="Primary Treatment", shape = "Primary Treatment", title = "Change in Antibody Levels: Day 14 - Baseline")
+hist(m.abb$ab_change)
+lm.change <- lm(ab_change ~ primary_treatment, data=m.abb)
+summary(lm.change)
+resid <- simulateResiduals(lm.change)
+plot(resid)
+plot(allEffects(lm.change))
+
+emm_results<- emmeans(lm.change, ~ primary_treatment)
+pairs(emm_results)
+
+```
+
+```{r Variance across DPI}
+#subset the data into primary_treatments
+#look at the amount of variance within each treatment while accounting for variance from differences in dpi
+s.ab <- p.ab %>%
+  filter(primary_treatment=="Sham")
+glm.s <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=s.ab, family=Gamma())
+glm.sf <- glm(elisa_od ~ 1+ dpi, data=s.ab, family=Gamma())
+summary(glm.s)
+summary(glm.sf)
+plot(allEffects(glm.sf))
+s.SD <- 0.328
+
+s.ab <- p.ab %>%
+  filter(primary_treatment=="Sham")
+
+glm.s <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=s.ab, family=Gamma())
+
+s.ab$resid <- resid(glm.s)
+
+glm.sr <- glm(abs(resid) ~ 1, data=s.ab, family=Gamma())
+
+summary(glm.sr)
+s.ab$residresid <- resid(glm.sr)
+sd(abs(s.ab$resid))
+
+ggplot(s.ab, aes(x=dpi, y=resid))+
+  geom_point(color="blue")+
+  labs(title="Sham", x="Days Post Infection", y="Residuals", color="Primary Treatment")
+
+l.ab <- p.ab %>%
+  filter(primary_treatment=="Low")
+
+glm.l <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=l.ab, family=Gamma())
+glm.lf <- glm(elisa_od ~ 1+ as.factor(dpi), data=l.ab, family=Gamma())
+glm.l1 <- glm(elisa_od ~ 1, data=l.ab)
+summary(glm.l1)
+
+l.ab$resid <- (resid(glm.l1))
+
+ggplot(l.ab, aes(x=dpi, y=resid))+
+  geom_point(color="green3")+
+  labs(title="Low", x="Days Post Infection", y="Residuals", color="Primary Treatment")
+
+l.SD <- 2.108
+
+h.ab <- p.ab %>%
+  filter(primary_treatment=="High")
+glm.h <- glmmTMB(elisa_od ~ 1 + (1|dpi), data=h.ab, family=Gamma())
+glm.h1 <- glm(elisa_od ~ 1, data=h.ab)
+rh<-abs((resid(glm.h1)))
+mean(rh)
+
+ggplot(h.ab, aes(x=dpi, y=resid))+
+  geom_point(color="salmon2")+
+  labs(title="High", x="Days Post Infection", y="Residuals", color="Primary Treatment")
+
+summary(glm.h)
+h.SD <- 4.522
+
+glm.sb <- glmmTMB(elisa_od ~ 1 + (1|band_number), data=s.ab, family=Gamma())
+glm.lb <- glmmTMB(elisa_od ~ 1 + (1|band_number), data=l.ab, family=Gamma())
+glm.hb <- glmmTMB(elisa_od ~ 1 + (1|band_number), data=h.ab, family=Gamma())
+
+##Days -8, 14, and 41 
+bsd <- c(0.0001342, 2.457, 0.00097)
+sd <- c(s.SD, l.SD, h.SD) #Standard Deviation from table above         
+g <- c("Sham", "Low", "High") #Groups
+
+#new df with variance and error for error bars (min/max)
+sd.dpi <- data.frame(g, sd)
+
+#plot standard deviation from the models above
+ggplot(sd.dpi, aes(x=fct_rev(g), y=sd, color=g))+
+  geom_point(size=3)+
+  scale_color_manual(values=c(pri_colors))+
+  labs(title="Variance during Primary Infection", x="Treatment Groups", y="Model Standard Deviation", color="Treatment Groups")+
+  theme_minimal()
+
+```{r Format ELISA 41 vs 56 comparison}
+m.ab1<-m.ab %>%
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
+                primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes) #make new df with just relevant variables
+
+
+elisa41 <- m.ab %>%
+  filter(dpi == 41 & band_number != 2375)%>% #dpi 41 for elisa
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
+                primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes) #df with only elisa od, band number, dpi from 41
+
+quant56 <- m.ab %>%
+  filter(dpi == 56 & band_number != 2375)%>% #dpi 56 only for path load; drop 2375 because there was no elisa for it on dpi 41
+  dplyr::select(dpi, quantity, elisa_od, band_number, infected_prim, infected_sec, seropos, seropos_prim, diseased, diseased_prim,
+                primary_treatment, secondary_treatment, primary_dose, secondary_dose, sex, tes)#df with only quantity, band number, dpi from d56
+
+summary(quant56)
+summary(elisa41)
+
+#add column to elisa41 df "from quant56 df row quantity, 
+#take all data where the band number from elisa41 match band number from quant56
+#returns new column with missing points as NA
+elisa41$quantity_dpi_56 <- quant56$quantity[match(elisa41$band_number,quant56$band_number)]
+elisa41$tes_dpi_56 <- quant56$tes[match(elisa41$band_number,quant56$band_number)]
+elisa41$dpi.check <- quant56$dpi[match(elisa41$band_number,quant56$band_number)] #check band numbers to see if match works
+elisa41$dpi.check.no <- quant56$band_number[match(elisa41$band_number,quant56$band_number)] #check band numbers to see if match works
+#elisa41$infected.d56 <-quant56$infected[match(elisa41$band_number,quant56$band_number)] #add variable specifying infection d56
+
+elisa41$threshold_cutoff = 50
+
+m.ab <- m.ab %>%
+  group_by(band_number) %>%
+  mutate(elisa_od_41 = elisa_od[dpi==41])
+
+ggplot(m.ab, aes(x=elisa_od, y=elisa_od_41, color=as.factor(dpi)))+
+  geom_point()
+
+elisa41 <- elisa41 %>%
+  mutate(infected.d56 = ifelse(quantity_dpi_56>threshold_cutoff, 1, 0))
+
+# Get all possible band_number values
+all_band_numbers <- m.ab %>% pull(band_number) %>% unique()
+
+
+# Create a data frame with all combinations of dpi and band_number
+all_combinations <- expand.grid(dpi = unique(elisa41$dpi), band_number = all_band_numbers)
+
+
+# Merge with the actual data to identify missing band_numbers
+missing_band_numbers <- all_combinations %>%
+  anti_join(elisa41, by = c("dpi", "band_number"))
+
+# Display the missing band_numbers
+print(missing_band_numbers)
+#2375 missing - didn't have enough plasma on pid 41
+summary(elisa41)
+
+
+# Get all possible band_number values
+all_band_numbers <- m.ab %>% pull(band_number) %>% unique()
+
+# Create a data frame with all combinations of dpi and band_number
+all_combinations <- expand.grid(dpi = unique(quant56$dpi), band_number = all_band_numbers)
+
+# Merge with the actual data to identify missing band_numbers
+missing_band_numbers56 <- all_combinations %>%
+  anti_join(quant56, by = c("dpi", "band_number"))
+
+# Display the missing band_numbers
+print(missing_band_numbers56)
+#2375 omitted b/c there wasn't plasma for an elisa on 41
+
+pr<-m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(quantity, band_number, elisa_od)
+pr
+count(pr)
+ab <- m.ab %>%
+  filter(dpi == 41)%>%
+  dplyr::select(elisa_od, band_number, primary_treatment)
+ab
+ab %>%
+  group_by(primary_treatment)
+
+elisa41 %>%
+  drop_na(quantity)
+```
+
+
+```{r Models}
+#do antibody levels on d41 predict infection on day 56, controlling for secondary inoculation?
+lm3 <- glm(infected.d56~elisa_od + secondary_dose, data=elisa41, family="binomial")
+summary(lm3)
+plot(allEffects(lm3))
+
+#does primary treatment predict infection on day 56, controlling for secondary inoculation?
+lm3.5 <- glm(infected.d56~primary_treatment + secondary_dose, data=elisa41, family="binomial")
+summary(lm3.5)
+plot(allEffects(lm3.5))
+
+#do antibody levels on d14 predict infection on day 56?
+lm4 <- glm(infected.d56~elisa_od + primary_treatment * secondary_dose, data=elisa41, family="binomial")
+summary(lm4)
+plot(allEffects(lm4))
+
+#hist(elisa41$quantity_dpi_56)
+#elisa41$log10.quantity_56 <- log10(elisa41$quantity_dpi_56 + 0.1)
+#hist(elisa41$log10.quantity_56)
+#lm5 <- glmmTMB(log10.quantity_56~secondary_dose + elisa_od, data=elisa41, family= nbinom1)
+#summary(lm5)
+#infd56 vs ab41
+dat.new=expand.grid(secondary_treatment=unique(elisa41$secondary_treatment),
+                    secondary_dose=unique(elisa41$secondary_dose),
+                    primary_treatment=unique(elisa41$primary_treatment),
+                    infected.d56=unique(elisa41$infected.d56),
+                    elisa_od=unique(elisa41$elisa_od),
+                    band_number=unique(elisa41$band_number))#new grid to put predictions into
+dat.new$yhat = predict(lm4, type="response", newdata=dat.new, re.form=NA) #predicted values based off glm.phago model
+head(dat.new)
+
+#plot showing predicted values - Antibodies on dpi 41 predict infection probability on dpsi 14
+ggplot(elisa41 %>% filter(infected.d56 != "NA"), aes(y=infected.d56, x=elisa_od))+
+  geom_point(aes(color=fct_rev(as.factor(infected.d56))), shape=1, size = 2, stroke=1.5)+
+  geom_line(data = dat.new, aes(x = elisa_od, y = yhat)) +
+  #stat_smooth(method = "glm",
+  #            method.args = list(family="binomial"), se=FALSE,
+  #            fullrange = TRUE)+
+  labs(x="ELISA OD Day 41", y="Infection Status Day 56", color = "Infection Status Day 56")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~primary_treatment~secondary_dose, ncol=5)
+
+#primary + secondary
+lm3.5 <- glm(infected.d56~elisa_od + primary_dose * secondary_dose, data=elisa41, family="binomial")
+summary(lm3.5)
+plot(allEffects(lm3.5))
+plot(resid(lm3.5))
+qqnorm(resid(lm3.5))
+qqline(resid(lm3.5))
+
+lm3.75 <-glm(infected.d56~elisa_od, data=elisa41, family="binomial")
+summary(lm3.75)
+
+dat.new=expand.grid(secondary_treatment=unique(elisa41$secondary_treatment),
+                    secondary_dose=unique(elisa41$secondary_dose),
+                    primary_treatment=unique(elisa41$primary_treatment),
+                    primary_dose=unique(elisa41$primary_dose),
+                    infected.d56=unique(elisa41$infected.d56),
+                    elisa_od=unique(elisa41$elisa_od),
+                    band_number=unique(elisa41$band_number))#new grid to put predictions into
+dat.new$yhat = predict(lm3.75, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+
+ggplot(elisa41%>% filter(infected.d56 != "NA"), aes(y=infected.d56, x=elisa_od))+
+  geom_point((aes(color=fct_rev(as.factor(infected.d56)))), shape=1, size = 3)+
+  #geom_point(data = dat.new, aes(x = elisa_od, y = yhat, color=as.factor(secondary_dose))) +
+  labs(x="ELISA OD Day 41", y="Infection Status Day 56", color = "Infection Status Day 56")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.3)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~secondary_treatment)
+
+ggplot(elisa41, aes(x=elisa_od, y=infected.d56, color = as.factor(primary_dose)))+
+  geom_point()+
+  #  geom_smooth(data = dat.new, aes(x = elisa_od, y = yhat, color = primary_treatment))+
+  facet_wrap(~primary_treatment)
+unique(m.ab$primary_treatment)
+```
+
+```{r Do Antibodies on day 41 protect from Pathology day 56?, warning=FALSE}
+#sum of eye scores secondary infection
+m.ab <- m.ab %>%
+  group_by(band_number)%>%
+  mutate(sec_ses = sum(tes[dpi>41], na.rm =TRUE))
+m.ab
+
+ggplot(m.ab, aes(x=tes, y=sec_ses, color=as.factor(dpi)))+
+  geom_point()
+
+ggplot(m.ab %>%filter(dpi>41), aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_jitter()+
+  geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
+  scale_color_manual(values=sec_colors)+
+  facet_wrap(~primary_treatment)
+
+ggplot(m.ab, aes(x=dpi, y=tes, color=fct_rev(primary_treatment)))+
+  geom_jitter(height=0)+
+  geom_line(aes(groups = band_number))+
+  #geom_smooth(aes(groups = band_number), span=0.5, size=0.5, se=FALSE)+
+  scale_color_manual(values=pri_colors)+
+  labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
+
+
+ggplot(m.ab %>% filter(dpi >41), aes(x=dpi, y=tes, color=as.factor(secondary_dose)))+
+  geom_jitter(height=0)+
+  geom_smooth(aes(groups = band_number), span=0.5, size=0.5)+
+  scale_color_manual(values=sec_colors)+
+  labs(y="Total Eye Score", x="Days Post Infection", color= "Secondary Dose")
+```
+
+
+```{r Do Antibodies on day 41 protect from Pathology day 56?, warning=FALSE}
+#do antibody levels on day 41 predict sum of eye scores post secondary infection when controlling for secondary dose?
+lm5 <- glm(sec_ses ~ elisa_od_41 + primary_treatment*secondary_dose, data=wibird, family=bi)
+summary(lm5)
+plot(allEffects(lm5))
+resid <- simulateResiduals(lm5)
+plot(resid)
+
+dat.new=expand.grid(sec_ses=unique(m.ab$sec_ses),
+                    secondary_dose=unique(m.ab$secondary_dose),
+                    primary_treatment=unique(m.ab$primary_treatment),
+                    elisa_od_41=unique(m.ab$elisa_od_41),
+                    band_number=unique(m.ab$band_number))#new grid to put predictions into
+dat.new$yhat = predict(lm5, type="response", newdata=dat.new, re.form=NA) #predicted values
+head(dat.new)
+unique(dat.new$band_number)
+
+ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=as.factor(secondary_dose)))+
+  geom_point(aes(color=as.factor(secondary_dose)), shape=1, size = 2, stroke=1)+
+  geom_line(data = dat.new, aes(x = elisa_od_41, y = yhat, groups=as.factor(secondary_dose))) +
+  labs(x="ELISA OD Day 41", y="Sum of Eye Score: Secondary Infection", color = "Secondary Dose")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~primary_treatment)
+
+ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=fct_rev(primary_treatment)))+
+  geom_point(aes(color=fct_rev(primary_treatment)), shape=1, size = 2, stroke=1)+
+  geom_line(data = dat.new, aes(x = elisa_od_41, y = yhat, groups=primary_treatment)) +
+  labs(x="ELISA OD Day 41", y="Sum of Eye Score: Secondary Infection", color = "Primiary Treatment")+
+  geom_vline(xintercept=0.061, linetype="dashed", alpha=0.5)+
+  xlim(c(0.04, 0.13))+
+  facet_wrap(~secondary_dose, ncol=5)
+
+
 ```

@@ -273,7 +273,7 @@ pairs(emm_results)
 
 #does antibody change from baseline to 14 predict susceptibility upon secondary infection?
 glm.abch <- glm(inf_sec ~ elisa_diff + primary_treatment*secondary_dose, data=wibird, family=binomial())
-glm.ab14<- glm(inf_sec ~ elisa_od_14 + primary_treatment*secondary_dose, data=wibird, family=binomial())
+glm.ab14<- glm(inf_sec ~ elisa_od_14 + log10(secondary_dose+1), data=wibird, family=binomial())
 summary(glm.ab14)
  simulateResiduals(glm.abch, plot=T)
  car::Anova(glm.abch, type="III")
