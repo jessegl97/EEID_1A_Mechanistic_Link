@@ -52,3 +52,17 @@ m.ab <- m.ab %>%
 #omit 2505 from data set for analysis as it was positive at quarantine
 m.ab <- m.ab %>%
   filter(band_number != 2505)
+
+#2562 appears twice on dpi 35: line #915 and #820 - removed the first instance as the second had one additional commen 4/17/24
+#2435 missing on dpi 21 - added to data set from data sheets 4/17/24
+#install.packages("gtsummary")
+library(gtsummary)
+
+m.ab %>%
+  #filter(dpi == 14) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )
+
+

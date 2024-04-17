@@ -4,7 +4,21 @@
 library(gt)
 
 library(gtExtras)
+table <- data %>%
+  gt() %>%
+  tab_spanner(label = "Antibody Levels", columns = vars(`Antibody (pv)`, `Antibody (cv)`)) %>%
+  cols_label(Dose = "Treatment", CoV = "Coefficient of Variation", DPI = "Day Post-Infection") %>%
+  fmt_number(columns = vars(CoV, `Antibody (pv)`, `Antibody (cv)`, Mean, DPI), decimals = 3) %>%
+  tab_style(style = list(
+    cell_fill(color = "lightgrey", align = "center"),
+    cells_body(
+      columns = vars(CoV, `Antibody (pv)`, `Antibody (cv)`, Mean, DPI),
+      background = "lightgreen"
+    )
+  ))
 
+# Print the table
+print(table)
 
 ```{r Inverse vs Log Link}
 #pre-infection
