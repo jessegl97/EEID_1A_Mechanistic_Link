@@ -399,8 +399,8 @@ mod.pred <- lm1.75
 #Model predictions
 dat.new=expand.grid(primary_treatment=unique(p.abt$primary_treatment),
                     elisa_od = unique(p.abt$elisa_od),
-                    dpi.f = unique(p.abt$dpi.f),
-                    sex = unique(p.abt$sex))#new grid to put predictions into
+                    dpi.f = unique(p.abt$dpi.f))
+                    #sex = unique(p.abt$sex))#new grid to put predictions into
 dat.new$yhat = predict(mod.pred, type="response", newdata=dat.new, re.form=NA)
 preds = predict(mod.pred, type="link", newdata=dat.new, se.fit=TRUE, re.form=NA)
 dat.new = cbind(dat.new, preds)
@@ -419,13 +419,13 @@ ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od,
   #geom_boxplot(outlier.shape = NA)+
   geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
   geom_jitter(size=2, alpha=0.5, width=0, height=0)+
-  geom_line(aes(x=dpi.f, y=elisa_od, group = as.factor(band_number)), alpha=0.1)+
-  #geom_path(data=dat.new, aes(x=dpi.f, y=yhat, group=primary_treatment), color="black")+
+  #geom_line(aes(x=dpi.f, y=elisa_od, group = as.factor(band_number)), alpha=0.1)+
+  geom_path(data=dat.new, aes(x=dpi.f, y=yhat, group=primary_treatment, color=fct_rev(primary_treatment)))+
   geom_errorbar(data=dat.new, aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat), color="black", width=0.1)+
   #stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=1.5, stroke=1.5, color="black")+
-  stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=1)+
+  #stat_summary(aes(group=primary_treatment, shape = primary_treatment), fun.y=mean, geom="point", shape=3, size=2.5, stroke=1.5, alpha=1)+
   #stat_summary(aes(group=primary_treatment), fun=mean, geom="line", color="black", size=0.5, alpha=1)+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.75, size=1)+  
+  #stat_summary(aes(group=primary_treatment), fun=mean, geom="line", alpha=0.75, size=1)+  
   geom_point(data=dat.new, aes(x=dpi.f, y=yhat, color=fct_rev(primary_treatment)), size=3, alpha=0.75, shape =16)+
   geom_point(data=dat.new, aes(x=dpi.f, y=yhat), color="black", size=3, alpha=1, shape=1, stroke=0.1)+
     labs(title = "Antibody Levels Primary Infection", y="Antibody Levels", 
@@ -438,6 +438,7 @@ ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od,
 ab.all <- ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od, 
                       color=fct_rev(primary_treatment)))+
   geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
+  geom_path(data=dat.new, position = position_dodge(width=-0.75), aes(x=dpi.f, y=yhat, color = fct_rev(primary_treatment), group=primary_treatment))+
   geom_jitter(position = position_jitterdodge(dodge.width = 0.75, jitter.width=0.4), aes(group = fct_rev(primary_treatment)), size=2, alpha=0.5)+
       geom_jitter(data=dat.new, position = position_dodge(width=0.75), aes(x=dpi.f, y=yhat, group = fct_rev(primary_treatment)), color="black", size=5, alpha=1, shape="-", stroke=0.25)+
    geom_errorbar(data=dat.new,  position = position_dodge(width=0.75), aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat, group=fct_rev(primary_treatment)), color="black", width=0.4)+  
@@ -453,6 +454,154 @@ ab.all
 
 ```
 
+```{r Proportional Variability Antibodies}
+#install.packages("remotes")
+#remotes::install_github("T-Engel/CValternatives")
+library(CValternatives)
+library(patchwork)
+p.ab$tes.new <- p.ab$tes + .01
+p.abi <- p.ab %>%
+  filter(inf_prim == 1)%>%
+  dplyr::select(dpi.f, primary_treatment, tes.new, elisa_od, quantity1)
+
+#antibodies
+a.cv <- p.abi %>% 
+  group_by(dpi.f, primary_treatment)%>%
+  drop_na(elisa_od)%>%
+  dplyr::summarise(mean_od = mean(elisa_od),
+            bird_cv = sd(elisa_od)/mean(elisa_od),
+            bird_sd = sd(elisa_od),
+            bird_pv = PV(elisa_od),
+            elisa_od = elisa_od)
+p.abi.m <- left_join(p.abi, a.cv)
+
+ggplot(p.abi, aes(x=dpi.f, y=elisa_od))+
+  geom_jitter(aes(color=fct_rev(primary_treatment)), alpha=0.5)+
+  geom_point(data=a.cv, aes(x=dpi.f, y=mean_od, color=fct_rev(primary_treatment)))+
+  geom_point(data=a.cv, aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment)), shape=5)+
+  geom_path(data=a.cv, aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment)))
+
+#Add pv values onto mean antibody levels
+ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od, 
+                      color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
+  geom_jitter(position = position_jitterdodge(dodge.width = 0.75, jitter.width=0.4), aes(group = fct_rev(primary_treatment)), size=2, alpha=0.5)+
+      geom_jitter(data=dat.new, position = position_dodge(width=0.75), aes(x=dpi.f, y=yhat, group = fct_rev(primary_treatment)), color="black", size=5, alpha=1, shape="-", stroke=0.25)+
+   geom_errorbar(data=dat.new,  position = position_dodge(width=0.75), aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat, group=fct_rev(primary_treatment)), color="black", width=0.4)+  
+geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, group=primary_treatment), color='black', size=2, shape=0, stroke=1)+
+  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=15)+
+  geom_path(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment), group=primary_treatment))+
+  #  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_cv, group=primary_treatment), color='black', size=2, shape=2, stroke=1)+
+  # geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_cv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=17)+
+    labs(x= "Days Post Infection", color="Primary Treatment")+
+  #facet_wrap(~sex)+
+  theme_minimal()+
+  scale_color_manual(values=c(pri_colors))+
+    scale_y_continuous(
+    name= "Antibody Levels",
+    sec.axi=sec_axis(~.*1, name="PV")
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=11),
+    axis.text.y = element_text(color="black"),
+    axis.text.y.right = element_text(color="black", face="bold"),
+    axis.title.y.right = element_text(color = "black", size=11, face = "bold")
+  ) 
+
+ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od,
+                      color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
+  geom_jitter(size=2, alpha=0.5, width=0, height=0)+
+  geom_path(data=dat.new, aes(x=dpi.f, y=yhat, group=primary_treatment, color=fct_rev(primary_treatment)))+
+  geom_errorbar(data=dat.new, aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat), color="black", width=0.1)+
+  geom_point(data=dat.new, aes(x=dpi.f, y=yhat, color=fct_rev(primary_treatment)), size=2, alpha=0.75, shape =16)+
+  geom_point(data=dat.new, aes(x=dpi.f, y=yhat), color="black", size=2, alpha=1, shape=1, stroke=0.1)+
+  geom_point(data=a.cv, aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment)), shape=5)+
+  geom_path(data=a.cv, aes(x=dpi.f, y=bird_pv, group=primary_treatment, color=fct_rev(primary_treatment)), linetype="dotted", size=0.5, alpha=0.5)+
+    labs(y="Antibody Levels", 
+       x= "Days Post Infection", shape="Primary Treatment", color="Primary Treatment")+
+  scale_color_manual(values=c(pri_colors))+
+  theme_minimal()+
+    scale_y_continuous(
+    name= "Antibody Levels",
+    sec.axi=sec_axis(~.*1, name="PV")
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=11),
+    axis.text.y = element_text(color="black"),
+    axis.text.y.right = element_text(color="black", face="bold"),
+    axis.title.y.right = element_text(color = "black", size=11, face = "bold")
+  ) 
+
+```
+
+
+```{r Max antibody level for each bird}
+
+a.max <- p.abt %>%
+  group_by(band_number)%>%
+  mutate(max_od = max(elisa_od))
+
+lm.ab.max <- glmmTMB(max_od~ primary_treatment, data=a.max, family=Gamma()) 
+summary(lm.ab.max)
+simulateResiduals(lm.ab.max, plot=T)
+hist(resid(lm.ab.max))
+car::Anova(lm.ab.max, type=3)
+
+
+#specify model to predict
+mod.pred <- lm.ab.max
+#Model predictions
+dat.new=expand.grid(primary_treatment=unique(a.max$primary_treatment),
+                    max_od = unique(a.max$max_od))
+                    #sex = unique(p.abt$sex))#new grid to put predictions into
+dat.new$yhat = predict(mod.pred, type="response", newdata=dat.new, re.form=NA)
+preds = predict(mod.pred, type="link", newdata=dat.new, se.fit=TRUE, re.form=NA)
+dat.new = cbind(dat.new, preds)
+
+ilink <- family(mod.pred)$linkinv
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+head(dat.new)
+
+
+a.cv.m <- a.max %>% 
+  group_by(primary_treatment)%>%
+  filter(dpi==14)%>%
+  drop_na(max_od)%>%
+  dplyr::summarise(
+            group_cv = sd(elisa_od)/mean(elisa_od),
+            group_sd = sd(elisa_od),
+            group_pv = PV(elisa_od),
+            max_od = max_od)
+a.max.v <- left_join(a.max, a.cv.m)
+
+ggplot(a.max.v)+
+  geom_crossbar(data=dat.new, aes(ymin=Lower, ymax=Upper, x=primary_treatment, y=yhat,
+                                  fill=fct_rev(primary_treatment)), alpha=0.01, width=0.5, stroke=0.01)+
+  geom_point(aes(x=primary_treatment, y=max_od, color=fct_rev(primary_treatment)),
+              alpha=0.5, size=4)+
+  geom_point(aes(x=primary_treatment, y=max_od),
+              alpha=0.25, size=4, shape=1)+
+  geom_point(data=a.max.v, aes(y=group_pv, x=primary_treatment, color=fct_rev(primary_treatment)), shape=25, size=4)+
+  theme_minimal()+
+  labs(x="Primary Treatment", y="Max Antibody OD", color="Primary Treatment", fill="Primary Treatment")+
+    scale_y_continuous(
+    sec.axi=sec_axis(~.*1, name="PV")
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=11),
+    axis.text.y = element_text(color="black"),
+    axis.text.y.right = element_text(color="black", face="bold"),
+    axis.title.y.right = element_text(color = "black", size=11, face = "bold")
+  ) 
+
+```
 ```{r Antibody levels on day 14 post infection were sig different between groups, fig.height=6, fig.width=10}
 #Final Model
 lm2 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == 14), family=Gamma())
@@ -487,7 +636,7 @@ missing_samples <- p.ab %>%
 print(missing_samples)
 
 #Model predictions
-mod.pred <- lm2
+mod.pred <- lm2.sex
 dat.new=expand.grid(primary_treatment=unique(p.ab$primary_treatment),
                     sex = unique(p.ab$sex))#new grid to put predictions into
 dat.new$yhat = predict(mod.pred, type="response", newdata=dat.new, re.form=NA) #predicted values based off lm2 model
@@ -510,7 +659,7 @@ pid14.pred <- ggplot(data=p.ab %>% filter(dpi == 14), aes(x=primary_treatment, y
   geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
   labs(x="Primary Treatment", y="Antibody Levels", color="Primary Treatment")+
   guides(shape=FALSE)+
-  #facet_wrap(~sex)+
+  facet_wrap(~sex)+
   theme_minimal()
 
 pid14.pred
@@ -925,7 +1074,7 @@ ggplot(m.cv.s, aes(x=dpi, y=bird_cv, color=fct_rev(primary_treatment)))+
 
 ```
 Proportional Variability
-```{r Proportional Variability}
+```{r Proportional Variability Antibodies}
 #install.packages("remotes")
 #remotes::install_github("T-Engel/CValternatives")
 library(CValternatives)
@@ -939,10 +1088,53 @@ p.abi <- p.ab %>%
 a.cv <- p.abi %>% 
   group_by(dpi, primary_treatment)%>%
   drop_na(elisa_od)%>%
-  dplyr::summarise(bird_cv = sd(elisa_od)/mean(elisa_od),
+  dplyr::summarise(mean_od = mean(elisa_od),
+            bird_cv = sd(elisa_od)/mean(elisa_od),
             bird_sd = sd(elisa_od),
-            bird_pv = PV(elisa_od))
+            bird_pv = PV(elisa_od),
+            elisa_od = elisa_od)
+p.abi.m <- left_join(p.abi, a.cv)
 
+ggplot(p.abi, aes(x=dpi, y=elisa_od))+
+  geom_jitter(aes(color=fct_rev(primary_treatment)), alpha=0.5)+
+  geom_point(data=a.cv, aes(x=dpi, y=mean_od, color=fct_rev(primary_treatment)))+
+  geom_point(data=a.cv, aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)), shape=5)+
+  geom_path(data=a.cv, aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)))
+
+#Add pv values onto mean antibody levels
+ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od, 
+                      color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
+  geom_jitter(position = position_jitterdodge(dodge.width = 0.75, jitter.width=0.4), aes(group = fct_rev(primary_treatment)), size=2, alpha=0.5)+
+      geom_jitter(data=dat.new, position = position_dodge(width=0.75), aes(x=dpi.f, y=yhat, group = fct_rev(primary_treatment)), color="black", size=5, alpha=1, shape="-", stroke=0.25)+
+   geom_errorbar(data=dat.new,  position = position_dodge(width=0.75), aes(ymin=Lower, ymax = Upper, x=dpi, y=yhat, group=fct_rev(primary_treatment)), color="black", width=0.4)+  
+ 
+  
+ab.all+ geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, group=primary_treatment), color='black', size=2, shape=0, stroke=1)+
+  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=15)+
+  geom_path(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment), group=primary_treatment))+
+  #  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_cv, group=primary_treatment), color='black', size=2, shape=2, stroke=1)+
+  # geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=bird_cv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=17)+
+    labs(x= "Days Post Infection", color="Primary Treatment")+
+  #facet_wrap(~sex)+
+  theme_minimal()+
+  scale_color_manual(values=c(pri_colors))+
+    scale_y_continuous(
+    name= "Antibody Levels",
+    sec.axi=sec_axis(~.*1, name="PV")
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=11),
+    axis.text.y = element_text(color="black"),
+    axis.text.y.right = element_text(color="black", face="bold"),
+    axis.title.y.right = element_text(color = "black", size=11, face = "bold")
+  ) 
+
+```
+
+
+```{r Proportional Variability}
 #eye score
 e.cv <- p.abi %>% 
   group_by(dpi, primary_treatment)%>%
@@ -996,8 +1188,8 @@ cv
 m.cv
 a.cv
 ```
-```{r Heterogeneity Paper Values; Hawley et al. 2024}
 
+```{r Heterogeneity Paper Values; Hawley et al. 2024}
 dose <- c("Sham", "Low", "High")
 CoV <- as.numeric(c(0.899, 1.630, 2.511))
 ab.pv <- as.numeric(c(0.04156784, 0.14716858, 0.18885516))
@@ -1011,34 +1203,42 @@ dpi <- 41
 het.df <- data.frame(dose, CoV, mean_sus, ab.pv, ab.cv, dpi, mean_ab)
 
 het.df$mean_sus_inv <- 1/het.df$mean_sus
-het.paper.only <- ggplot(het.df, aes(x=DPI.41))+
+het.paper.only <- ggplot(het.df, aes(x=Metric))+
     geom_point(size=3,aes(x="CoV", y=CoV, color=dose), shape = 15)+
-  geom_point(size=3.7,aes(x="CoV", y=CoV, shape = "CoV"), color="red", shape=0, stroke = 2)+
+  geom_point(size=3.7,aes(x="CoV", y=CoV, shape = "CoV"), color="black", shape=0, stroke = 2)+
   scale_color_manual(values=c(pri_colors))+
   scale_y_continuous(
     name= "Variability in Susceptibility (CoV) Hawley et al. 2024"
   )+
   theme_minimal()+
   theme(
-    axis.title.y = element_text(color = "red", size=12, face="bold")
+    axis.title.y = element_text(color = "black", size=12, face="bold")
   ) +
   labs(color = "Primary Treatment", shape= "Variability Metric")
 het.paper.only
 
-ab.paper.only <- ggplot(het.df, x=DPI.41)+
-  geom_point(size=3,aes(x="PV", y=ab.pv, color=dose, shape = "PV"), shape=19)+
-   geom_point(size=3.6,aes(x="PV", y=ab.pv), color="black", shape=1, stroke = 2)+
+ab.paper.only <- ggplot(het.df, x=Metric)+
+  geom_point(size=4,aes(x="PV", y=ab.pv, color=dose, shape="PV"))+
+  geom_point(size=4,aes(x="CV", y=ab.cv, color=dose, shape = "CV"))+
+   #geom_point(size=3.6,aes(x="PV", y=ab.pv), color="black", shape=1, stroke = 2)+
   scale_color_manual(values=c(pri_colors))+
   scale_y_continuous(
     name="Variability in Antibody Levels"
   )+
+  scale_x_discrete(
+    name="Metric"
+  )+
+  scale_shape_manual(values=c(17,19))+
   theme_minimal()+
   theme(
     axis.title.y = element_text(color = "black", size=12, face = "bold")
   ) +
   labs(color = "Primary Treatment", shape= "Variability Metric")
 ab.paper.only
+```
 
+
+```{r Heterogeneity Paper Values; Hawley et al. 2024}
 coeff <- 10
 het.paper <- ggplot(het.df)+
   geom_point(size=3,aes(x="PV", y=ab.pv*coeff, color=dose, shape = "PV"))+
@@ -1112,7 +1312,7 @@ ggplot(het.df)+
 het.paper.only
 ab.paper.only
 het.paper
- pri.ab.var
+#pri.ab.var
 
  library(knitr)
 
@@ -1125,6 +1325,36 @@ data <- t(data)
 kable(data, format = "markdown", row.names = TRUE) %>%
   kable_styling(full_width = FALSE) %>%
   kable_styling(bootstrap_options = "striped", "hover", font_size = 14, position = "center")
+
+#Add pv values onto mean antibody levels
+ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od, 
+                      color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
+  geom_jitter(position = position_jitterdodge(dodge.width = 0.75, jitter.width=0.4), aes(group = fct_rev(primary_treatment)), size=2, alpha=0.5)+
+      geom_jitter(data=dat.new.ab, position = position_dodge(width=0.75), aes(x=dpi.f, y=yhat, group = fct_rev(primary_treatment)), color="black", size=5, alpha=1, shape="-", stroke=0.25)+
+   geom_errorbar(data=dat.new.ab,  position = position_dodge(width=0.75), aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat, group=fct_rev(primary_treatment)), color="black", width=0.4)+  
+  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=as.factor(dpi), y=bird_pv, group=primary_treatment), color='black', size=2, shape=0, stroke=1)+
+  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=as.factor(dpi), y=bird_pv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=15)+
+  geom_jitter(data=het.df, position = position_dodge(width = +0.75), aes(x=as.factor(dpi), y=mean_sus_inv_scaled, color=dose), size=2)+
+  geom_jitter(data=het.df, position = position_dodge(width = +0.75), aes(x=as.factor(dpi), y=mean_sus_inv_scaled, groups=dose), color='red', shape= 1, size=2)+
+  #  geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=as.factor(dpi), y=bird_cv, group=primary_treatment), color='black', size=2, shape=2, stroke=1)+
+  # geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=as.factor(dpi), y=bird_cv, color=fct_rev(primary_treatment), group=primary_treatment), size=2, shape=17)+
+    labs(x= "Days Post Infection", color="Primary Treatment")+
+  #facet_wrap(~sex)+
+  theme_minimal()+
+  scale_color_manual(values=c(pri_colors))+
+    scale_y_continuous(
+    name= "Antibody Levels",
+    sec.axi=sec_axis(~.*1, name="PV")
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=11),
+    axis.text.y = element_text(color="black"),
+    axis.text.y.right = element_text(color="black", face="bold"),
+    axis.title.y.right = element_text(color = "black", size=11, face = "bold")
+  ) 
+
 ```
 
 ```{r variability primary - iffy}
@@ -1178,6 +1408,14 @@ wibird <- wibird %>% mutate(totalTES = sum())
 wibird$elisa_diff1 <- wibird$elisa_diff + 0.00001
 wibird$sec_dose.n <- wibird$secondary_dose+1
 wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits=2)
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec)%>%
+  tbl_summary(
+    by=inf_sec
+  )
+
 ```
 
 
@@ -1228,6 +1466,13 @@ ggplot(mg.sham%>% filter(dpi %in% c(-8, 14, 41, 56)), aes(x=dpi, y=elisa_od, col
 #   facet_wrap(~inf_sec)
 ```
 ```{r Are antibody levels on day 14 predictive of susceptibility upon secondary challenge}
+band_number_summary <- m.ab %>%
+  group_by(inf_sec, primary_treatment, secondary_treatment) %>%
+  summarize(
+    num_band_numbers = n_distinct(band_number)
+  )
+
+
 m.ab.w <- m.ab %>% 
   dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
                           sex, elisa_od, inf_sec)%>%
@@ -1240,34 +1485,45 @@ wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
 #could try scaling antibody levels to help w/ effect sizes: value - minimum / max - min 0 to 1
 # sc.wibird <- wibird %>%
 #   dplyr::select(band_number, primary_treatment, secondary_dose, inf_sec, log10.sec_dose, elisa_od_14)%>%
+#   drop_na(elisa_od_14)%>%
+#   group_by(band_number)%>%
 #   mutate(scaled_od_14 = (elisa_od_14 - min(elisa_od_14)) / (max(elisa_od_14) - min(elisa_od_14)))
 # 
-# wibird$scaled_od
+# sc.wibird$scaled_od_14
 wibird <- wibird %>% mutate(totalTES = sum())
 wibird$sec_dose.n <- wibird$secondary_dose+1
 wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits = 2)
 
 wibird$log10.sec_dose <- as.numeric(wibird$log10.sec_dose)
 
+# Replace NA values in elisa_od_14 with corresponding values from elisa_od_41
+wibird <- wibird %>% 
+  mutate(elisa_od_14_new = ifelse(is.na(elisa_od_14), elisa_od_41, elisa_od_14))
+
 glm.ab14.all <- glm(inf_sec ~ elisa_od_14*log10.sec_dose, data=wibird, family=binomial()) #Interaction is not significant
 glm.ab14 <- glm(inf_sec ~ elisa_od_14 + log10.sec_dose, data=wibird, family=binomial())
+glm.ab14.new <- glm(inf_sec ~ elisa_od_14_new + log10.sec_dose, data=wibird, family=binomial()) #Interaction is not significant
+summary(glm.ab14.new)
 
 AIC(glm.ab14.all, glm.ab14)
 summary(glm.ab14.all)
 summary(glm.ab14)
+
 car::Anova(glm.ab14, type = 3)
 simulateResiduals(glm.ab14, plot=T)
 
+mod <- glm.ab14
 dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
                     inf_sec=unique(wibird$inf_sec),
-                    elisa_od_14=unique(wibird$elisa_od_14))
-dat.new$yhat=predict(glm.ab14, type="response", newdata = dat.new)
+                    #elisa_od_14_new=unique(wibird$elisa_od_14_new),
+                    elisa_od_14 = unique(wibird$elisa_od_14))
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
 #prediction intervals
-preds = predict(glm.ab14, type = "link", newdata = dat.new, se.fit =T)
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
 #bind se's and fitted points
 dat.new = cbind(dat.new, preds)
 #inverse link function
-ilink <- family(glm.ab14)$linkinv
+ilink <- family(mod)$linkinv
 #back transform CIs
 dat.new <- transform(dat.new,
                      Fitted = ilink(fit),
@@ -1284,6 +1540,22 @@ sec_dose_names <- c(
   "3.85" = "Log10(7000+1)"
 )
 
+#replacing NA with ELISA OD 41 Values
+# ggplot(wibird, aes(x=(elisa_od_14_new), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+#   geom_line(data=dat.new, aes(x=(elisa_od_14_new), y=yhat), alpha = 1, size =1)+
+#    geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14_new, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+#     geom_point(alpha=0.5, size=2)+
+#   scale_color_manual(values = c(sec_colors))+
+#     scale_fill_manual(values = c(sec_colors))+
+#   labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="log10(Secondary Dose + 1)", fill ="log10(Secondary Dose + 1)")+
+#   scale_x_continuous(name = "Antibody Levels Day 14",
+#                      labels = scales::number_format(accuracy = 0.01))+
+#   #scale_x_reverse()+
+#   #scale_y_reverse()+
+#   theme_minimal()+
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+#   facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)
+
 ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)))+
   geom_line(data=dat.new, aes(x=(elisa_od_14), y=yhat), alpha = 1, size =1)+
    geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
@@ -1296,10 +1568,10 @@ ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)
   #scale_x_reverse()+
   #scale_y_reverse()+
   theme_minimal()+
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))+
   facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)
-
-
 
 ```
 
@@ -1331,19 +1603,98 @@ dat.new <- transform(dat.new,
 ggplot(wibird, aes(x=(elisa_od_41), y=(inf_sec), color=as.factor(log10.sec_dose)))+
   geom_point(alpha=0.5)+
   geom_line(data=dat.new, aes(x=(elisa_od_41), y=yhat), alpha = 1, size =1)+
-   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.1) + 
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
   scale_color_manual(values = c(sec_colors))+
     scale_fill_manual(values = c(sec_colors))+
   labs(x="Antibody Levels Day 41", y= "Susceptibility (Secondary Infection 0|1)", color="log10(Secondary Dose)", fill ="log10(Secondary Dose)")+
-  facet_wrap(~log10.sec_dose, nrow=1)+
+facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)+
   scale_x_continuous(name = "Antibody Levels Day 41",
                      labels = scales::number_format(accuracy = 0.01))+
   #scale_x_reverse()+
   theme_minimal()+
-    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))
+
+```
+```{r do baseline antibody levels predict susceptibility}
+glm.ab.pre <- glm(inf_sec ~ `elisa_od_-8` + log10.sec_dose, data=wibird, family=binomial())
+summary(glm.ab.pre)
+car::Anova(glm.ab.pre, type = 3)
+simulateResiduals(glm.ab.pre, plot=T)
+
+
+dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
+                    inf_sec=unique(wibird$inf_sec),
+                    `elisa_od_-8`=unique(wibird$`elisa_od_-8`))#new grid to put predictions into
+dat.new$yhat=predict(glm.ab.pre, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(glm.ab.pre, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(glm.ab.pre)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+ggplot(wibird, aes(x=(`elisa_od_-8`), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_point(alpha=0.5)+
+  geom_line(data=dat.new, aes(x=(elisa_od_.8), y=yhat), alpha = 1, size =1)+
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_.8, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+  scale_color_manual(values = c(sec_colors))+
+    scale_fill_manual(values = c(sec_colors))+
+  labs(x="Antibody Levels Day -8", y= "Susceptibility (Secondary Infection 0|1)", color="log10(Secondary Dose)", fill ="log10(Secondary Dose)")+
+facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)+
+  scale_x_continuous(name = "Antibody Levels Day -8",
+                     labels = scales::number_format(accuracy = 0.01))+
+  #scale_x_reverse()+
+  theme_minimal()+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))
 
 ```
 
+```{r}
+glm.ab.all <- glm(inf_sec ~ elisa_od + log10.sec_dose, data=m.ab %>% filter(dpi <42), family=binomial())
+summary(glm.ab.all)
+car::Anova(glm.ab.all, type=3)
+
+dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
+                    inf_sec=unique(wibird$inf_sec),
+                    `elisa_od_-8`=unique(wibird$`elisa_od_-8`),
+                    elisa_od_14=unique(wibird$elisa_od_14),
+                    elisa_od_41=unique(wibird$elisa_od_41))
+dat.new$yhat=predict(glm.ab.all, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(glm.ab.all, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(glm.ab.all)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+ggplot(wibird, aes(x=(`elisa_od_-8`), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_point(alpha=0.5)+
+  geom_line(data=dat.new, aes(x=(elisa_od_.8), y=yhat), alpha = 1, size =1)+
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_.8, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+  scale_color_manual(values = c(sec_colors))+
+    scale_fill_manual(values = c(sec_colors))+
+  labs(x="Antibody Levels Day -8", y= "Susceptibility (Secondary Infection 0|1)", color="log10(Secondary Dose)", fill ="log10(Secondary Dose)")+
+facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)+
+  scale_x_continuous(name = "Antibody Levels Day -8",
+                     labels = scales::number_format(accuracy = 0.01))+
+  #scale_x_reverse()+
+  theme_minimal()+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
 
 ```{r secondary disease duration}
 diseased_duration_sec <- m.ab %>%
@@ -1511,24 +1862,36 @@ e.pv.i <- m.ab %>%
   ungroup() 
 
 #calculate average variability across secondary infection infected birds
-e.pv.i.m <- e.pv.i%>%
-  dplyr::select(primary_treatment, secondary_dose, bird_cv, bird_sd, bird_pv)%>%
-  group_by(primary_treatment, secondary_dose)%>%
-  summarise(
-    avg_bird_cv = mean(bird_cv),
-    avg_bird_sd = mean(bird_sd),
-    avg_bird_pv = mean(bird_pv)
-  )
+# e.pv.i.m <- e.pv.i%>%
+#   dplyr::select(primary_treatment, secondary_dose, bird_cv, bird_sd, bird_pv)%>%
+#   group_by(primary_treatment, secondary_dose)%>%
+#   summarise(
+#     avg_bird_cv = mean(bird_cv),
+#     avg_bird_sd = mean(bird_sd),
+#     avg_bird_pv = mean(bird_pv)
+#   )
+
+summary_table <- m.ab %>%
+  filter(infected == 1 & dpi > 41) %>%
+  group_by(dpi, primary_treatment, secondary_dose) %>%
+  summarise(num_infected_birds = n_distinct(band_number)) %>%
+  ungroup()
+
+summary_table
+
+e.pv.i <- left_join(e.pv.i, summary_table, by = c("dpi", "primary_treatment", "secondary_dose"))
 
 #eye score PV infected birds
 ggplot(e.pv.i%>% filter(dpi > 41), aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)))+ 
-  geom_point(size=2, aes(x=dpi, y=bird_pv), alpha=1)+
-  geom_point(data=e.pv.i %>% filter(dpi > 41), aes(x=dpi, y=bird_cv), alpha=0.5)+
+  geom_point(aes(x=dpi, y=bird_pv, size=num_infected_birds), alpha=1)+
+  #geom_point(aes(x=dpi, y=bird_cv), alpha=0.5)+
   scale_color_manual(values=pri_colors)+
   geom_path(aes(group=primary_treatment, x=dpi, y=bird_pv))+
-  geom_path(aes(group=primary_treatment, x=dpi, y=bird_cv), linetype="dashed")+
+    geom_text(aes(label = num_infected_birds, x = dpi, y = bird_pv), vjust = -0.75, size = 3, color='black') +
+  #geom_path(aes(group=primary_treatment, x=dpi, y=bird_cv), linetype="dashed")+
   labs(x="Primary Treatment", y= "PV", color= "Primary Treatment", title = "Eye Score")+
-  facet_wrap(~secondary_dose,nrow=1)
+  facet_wrap(~secondary_dose,nrow=1)+
+  theme_minimal()
 
 #mean PV infected birds
 ggplot(e.pv.i.m, aes(x=as.factor(secondary_dose), y=avg_bird_pv, color=fct_rev(primary_treatment)))+ 
@@ -1557,7 +1920,7 @@ g.pv.inf <- m.ab %>%
            bird_sd = sd(quantity1.inf),
           bird_pv = PV(quantity1.inf))
 
-#remove uninfected birds
+#remove uninfected birds ###This is sus I don't think it's correct b/c variability is too low with high secondary dose
 p.pv.i <- m.ab %>%
   filter(dpi > 41 & inf_sec == 1) %>%
   group_by(dpi, primary_treatment, secondary_dose) %>%
@@ -1572,23 +1935,38 @@ p.pv.i <- m.ab %>%
   )%>%
   ungroup() 
 
+summary_table <- m.ab %>%
+  filter(infected == 1 & dpi > 41) %>%
+  group_by(dpi, primary_treatment, secondary_dose) %>%
+  summarise(num_infected_birds = n_distinct(band_number)) %>%
+  ungroup()
+
+summary_table
+
+p.pv.i <- left_join(p.pv.i, summary_table, by = c("dpi", "primary_treatment", "secondary_dose"))
+
 #path load PV
 ggplot(g.pv, aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)))+ 
   geom_point(size=2, aes(alpha="PV"), alpha = 1)+
   scale_color_manual(values=pri_colors)+
   geom_path(aes(group=primary_treatment))+
   labs(x="Day Post Infection", y= "PV", color= "Primary Treatment", title = "Pathogen Load")+
-  facet_wrap(~secondary_dose,nrow=1)
+  facet_wrap(~secondary_dose,nrow=1)+
+  theme_minimal()
 
 #path load PV below cutoff removed
 ggplot(p.pv.i, aes(x=dpi, y=bird_pv, color=fct_rev(primary_treatment)))+ 
-  geom_point(aes(x=dpi, y=bird_pv), size=2, alpha = 1)+
-  geom_point(aes(x=dpi, y=bird_cv), size=2, alpha=0.5)+
+  geom_point(aes(x=dpi, y=bird_pv, size=num_infected_birds), alpha = 1)+
+  #geom_point(aes(x=dpi, y=bird_cv), size=2, alpha=0.5)+
+  geom_text(aes(label = num_infected_birds, x = dpi, y = bird_pv), vjust = -0.75, size = 3, color='black') +
   scale_color_manual(values=pri_colors)+
-  geom_path(aes(group=primary_treatment))+
-  geom_path(aes(x=dpi, y=bird_cv, group=primary_treatment), linetype="dashed")+
+  geom_line(aes(group=primary_treatment))+
+  #geom_path(aes(x=dpi, y=bird_cv, group=primary_treatment), linetype="dashed")+
   labs(x="Day Post Infection", y= "Variability", color= "Primary Treatment", title = "Pathogen Load")+
-  facet_wrap(~secondary_dose,nrow=1)
+  facet_wrap(~secondary_dose,nrow=1)+
+  theme_minimal()
+
+
 
 
 
@@ -1624,64 +2002,6 @@ m.ab %>%
 
 ```
 
-```{r Path load and eye score raw data}
-#remove uninfected birds
-p.i <- m.ab %>%
-  filter(inf_sec == 1 & quantity1 > 1)
-
-#path load quantity below cutoff removed by primary
-ggplot(p.i %>% filter(dpi > 41), aes(x=dpi, y=log10(quantity1.inf), color=fct_rev(primary_treatment)))+ 
-  geom_jitter(size=2, alpha = 0.25, height = 0, width=0.15)+
-  scale_color_manual(values=pri_colors)+
-  stat_summary(aes(group=primary_treatment), fun=mean, geom="line")+
-    stat_summary(aes(group=primary_treatment), fun=mean, geom="point")+
-      stat_summary(aes(group=primary_treatment), fun=mean, geom="point", color="black", shape=1)+
-  labs(x="Day Post Infection", y= "Log10(Quantity+1)", color= "Primary Treatment", title = "Pathogen Load")+
-  facet_wrap(~secondary_dose,nrow=1)+
-  theme_minimal()
-
-ggplot(g.pv, aes(x=dpi, y=bird_cv, color=fct_rev(primary_treatment)))+ 
-  geom_point(alpha = 1, shape = 17)+
-  geom_path(aes(group=primary_treatment, y=bird_cv), linetype="solid", alpha=1)+
-  scale_color_manual(values=pri_colors)+
-  labs(x="Primary Treatment", y= "CV", color= "Primary Treatment", title = "Pathogen Load")+
-  facet_wrap(~secondary_dose,nrow=1)
-
-   
-m.ab$dpsi <- as.numeric(m.ab$dpsi)
-#log10(quant1)
-quant.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=log10(quantity1), color=fct_rev(primary_treatment)))+
-  geom_hline(yintercept = log10(50))+
-  geom_jitter(alpha=0.5, width=0.1)+
-  stat_summary(aes(x=dpsi, y=log10(quantity1), groups=primary_treatment), fun=mean, geom="point")+
-  stat_summary(aes(x=dpsi, y=log10(quantity1), groups=primary_treatment), fun=mean, geom="line")+
-    labs(x="Day Post Secondary Inoculation", y= "log10(quntity1)", color= "Primary Treatment", title = "Pathogen Load")+
-    scale_color_manual(values=pri_colors)+
-  facet_wrap(~secondary_dose, nrow=1)
-
-#quant1
-quant1.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=quantity1, color=fct_rev(primary_treatment)))+
-  geom_hline(yintercept = 50)+
-  geom_point(alpha=0.5)+
-  stat_summary(aes(x=dpsi, y=quantity1, groups=primary_treatment), fun=mean, geom="point")+
-  stat_summary(aes(x=dpsi, y=quantity1, groups=primary_treatment), fun=mean, geom="line")+
-    scale_color_manual(values=pri_colors)+
-  facet_wrap(~secondary_dose, nrow=1)
-
-
-tes.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=tes, color=fct_rev(primary_treatment)))+
-  geom_point( alpha=0.5)+
-  stat_summary(aes(x=dpsi, y=tes, groups=primary_treatment), fun=mean, geom="point")+
-    stat_summary(aes(x=dpsi, y=tes, groups=primary_treatment), fun=mean, geom="line")+
-    scale_color_manual(values=pri_colors)+
-      labs(x="Day Post Secondary Inoculation", y= "Total Eye Score", color= "Primary Treatment", title = "Eye Score")+
-  facet_wrap(~secondary_dose, nrow=1)
-
-quant.raw
-quant1.raw
-tes.raw
-
-```
 
 ```{r Mean Path load / Model Preds}
 p.i <- m.ab %>%
@@ -1737,7 +2057,25 @@ ggplot(p.i %>% filter(dpi > 41 & inf_sec == 1), aes(x=dpi.f, y=log10_quantity1, 
   facet_wrap(~log10.sec_dose,nrow=1)+
   theme_minimal()
 
+
+#path load quantity below cutoff removed by primary with model predictions
+ggplot(p.i %>% filter(dpi > 41), aes(x=dpi.f, y=log10_quantity1, color=as.factor(log10.sec_dose)))+ 
+  geom_jitter(size=2, alpha = 0.25, height = 0, width=0.15)+
+  scale_color_manual(values=sec_colors[2:5])+
+   stat_summary(aes(group=log10.sec_dose, color = as.factor(log10.sec_dose)), fun=mean, geom="line")+
+  stat_summary(aes(group=log10.sec_dose, color = as.factor(log10.sec_dose)), fun=mean, geom="point")+
+  # stat_summary(aes(group=primary_treatment), fun=mean, geom="point", color="black", shape=1)+
+  #geom_point(data=dat.new, aes(x=dpi.f, y=yhat))+
+  #geom_line()+
+  #geom_line(data=dat.new, aes(x=dpi.f, y=yhat, group=log10.sec_dose))+
+  #geom_errorbar(data=dat.new, aes(ymin=Lower, ymax=Upper, x=dpi.f, y=yhat), width=0.1, alpha=0.1)+
+  labs(x="Day Post Infection", y= "Log10(Quantity+1)", color= "Primary Treatment", title = "Pathogen Load")+
+  facet_wrap(~primary_treatment,nrow=1)+
+  theme_minimal()
+
+
 ```
+
 ```{r Mean eye score / model preds}
 p.i$band_number <- as.numeric(p.i$band_number)
 glm.eye <- glm(tes.new ~ primary_treatment * log10.sec_dose + dpi.f + (1|band_number), data=p.i)

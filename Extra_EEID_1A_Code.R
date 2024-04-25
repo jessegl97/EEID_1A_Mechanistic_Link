@@ -845,3 +845,54 @@ ggplot(m.ab %>% filter(dpi >= 42), aes(y=sec_ses, x=elisa_od_41, color=fct_rev(p
 
 
 ```
+```{r Path load and eye score raw data}
+#remove uninfected birds
+p.i <- m.ab %>%
+  filter(inf_sec == 1 & quantity1 > 1)
+
+#path load quantity below cutoff removed by primary
+ggplot(p.i %>% filter(dpi > 41), aes(x=dpi, y=log10(quantity1.inf), color=fct_rev(primary_treatment)))+ 
+  geom_jitter(size=2, alpha = 0.25, height = 0, width=0.15)+
+  scale_color_manual(values=pri_colors)+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="line")+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="point")+
+  stat_summary(aes(group=primary_treatment), fun=mean, geom="point", color="black", shape=1)+
+  labs(x="Day Post Infection", y= "Log10(Quantity+1)", color= "Primary Treatment", title = "Pathogen Load")+
+  facet_wrap(~secondary_dose,nrow=1)+
+  theme_minimal()
+
+
+
+
+m.ab$dpsi <- as.numeric(m.ab$dpsi)
+#log10(quant1)
+quant.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=log10(quantity1), color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = log10(50))+
+  geom_jitter(alpha=0.5, width=0.1)+
+  stat_summary(aes(x=dpsi, y=log10(quantity1), groups=primary_treatment), fun=mean, geom="point")+
+  stat_summary(aes(x=dpsi, y=log10(quantity1), groups=primary_treatment), fun=mean, geom="line")+
+  labs(x="Day Post Secondary Inoculation", y= "log10(quntity1)", color= "Primary Treatment", title = "Pathogen Load")+
+  scale_color_manual(values=pri_colors)+
+  facet_wrap(~secondary_dose, nrow=1)
+
+#quant1
+quant1.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=quantity1, color=fct_rev(primary_treatment)))+
+  geom_hline(yintercept = 50)+
+  geom_point(alpha=0.5)+
+  stat_summary(aes(x=dpsi, y=quantity1, groups=primary_treatment), fun=mean, geom="point")+
+  stat_summary(aes(x=dpsi, y=quantity1, groups=primary_treatment), fun=mean, geom="line")+
+  scale_color_manual(values=pri_colors)+
+  facet_wrap(~secondary_dose, nrow=1)
+
+
+tes.raw <- ggplot(m.ab %>% filter(dpsi %in% c(4, 7, 14, 21)), aes(x=dpsi, y=tes, color=fct_rev(primary_treatment)))+
+  geom_point( alpha=0.5)+
+  stat_summary(aes(x=dpsi, y=tes, groups=primary_treatment), fun=mean, geom="point")+
+  stat_summary(aes(x=dpsi, y=tes, groups=primary_treatment), fun=mean, geom="line")+
+  scale_color_manual(values=pri_colors)+
+  labs(x="Day Post Secondary Inoculation", y= "Total Eye Score", color= "Primary Treatment", title = "Eye Score")+
+  facet_wrap(~secondary_dose, nrow=1)
+
+quant.raw
+quant1.raw
+tes.raw
