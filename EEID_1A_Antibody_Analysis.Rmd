@@ -512,13 +512,13 @@ geom_jitter(data=a.cv, position = position_dodge(width = -0.75), aes(x=dpi.f, y=
 ggplot(data=p.abt, aes(x=dpi.f, y= elisa_od,
                       color=fct_rev(primary_treatment)))+
   geom_hline(yintercept = 0.061, linetype="dashed", alpha=0.25)+
-  geom_jitter(size=2, alpha=0.5, width=0, height=0)+
+  geom_jitter(size=2, alpha=0.5, width=0.2, height=0)+
   geom_path(data=dat.new, aes(x=dpi.f, y=yhat, group=primary_treatment, color=fct_rev(primary_treatment)))+
   geom_errorbar(data=dat.new, aes(ymin=Lower, ymax = Upper, x=dpi.f, y=yhat), color="black", width=0.1)+
   geom_point(data=dat.new, aes(x=dpi.f, y=yhat, color=fct_rev(primary_treatment)), size=2, alpha=0.75, shape =16)+
   geom_point(data=dat.new, aes(x=dpi.f, y=yhat), color="black", size=2, alpha=1, shape=1, stroke=0.1)+
-  geom_point(data=a.cv, aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment)), shape=5)+
-  geom_path(data=a.cv, aes(x=dpi.f, y=bird_pv, group=primary_treatment, color=fct_rev(primary_treatment)), linetype="dotted", size=0.5, alpha=0.5)+
+  geom_point(data=a.cv, aes(x=dpi.f, y=bird_pv, color=fct_rev(primary_treatment)), shape=5, size=2.5)+
+  geom_path(data=a.cv, aes(x=dpi.f, y=bird_pv, group=primary_treatment, color=fct_rev(primary_treatment)), linetype="dotdash", size=0.5, alpha=0.5)+
     labs(y="Antibody Levels", 
        x= "Days Post Infection", shape="Primary Treatment", color="Primary Treatment")+
   scale_color_manual(values=c(pri_colors))+
@@ -583,12 +583,16 @@ a.max.v <- left_join(a.max, a.cv.m)
 ggplot(a.max.v)+
   geom_crossbar(data=dat.new, aes(ymin=Lower, ymax=Upper, x=primary_treatment, y=yhat,
                                   fill=fct_rev(primary_treatment)), alpha=0.01, width=0.5, stroke=0.01)+
+  #geom_boxplot(aes(x=primary_treatment, y=max_od, fill=fct_rev(primary_treatment)),
+  #            alpha=0.25, outlier.shape = NA)+
   geom_point(aes(x=primary_treatment, y=max_od, color=fct_rev(primary_treatment)),
-              alpha=0.5, size=4)+
+              alpha=0.25, size=4)+
   geom_point(aes(x=primary_treatment, y=max_od),
               alpha=0.25, size=4, shape=1)+
-  geom_point(data=a.max.v, aes(y=group_pv, x=primary_treatment, color=fct_rev(primary_treatment)), shape=25, size=4)+
-  theme_minimal()+
+  geom_point(data=a.max.v, aes(y=group_pv, x=primary_treatment, color=fct_rev(primary_treatment), fill=fct_rev(primary_treatment)), shape=25, size=4)+
+  geom_point(data=a.max.v, aes(y=group_pv, x=primary_treatment), shape=25, size=4, color='black', alpha=0.01)+
+
+    theme_minimal()+
   labs(x="Primary Treatment", y="Max Antibody OD", color="Primary Treatment", fill="Primary Treatment")+
     scale_y_continuous(
     sec.axi=sec_axis(~.*1, name="PV")
@@ -1175,7 +1179,7 @@ pri.ab.var <- ggplot(a.cv , aes(x=dpi, y=bird_pv))+
 
 pri.ab.var
 
-ggsave('ab_var_prim.jpeg', width=6, height=4, units='in')
+#ggsave('ab_var_prim.jpeg', width=6, height=4, units='in')
 
 ggplot(a.cv, aes(x=bird_pv, y=bird_cv, color=fct_rev(primary_treatment)))+
   geom_point()+
@@ -1191,7 +1195,7 @@ a.cv
 
 ```{r Heterogeneity Paper Values; Hawley et al. 2024}
 dose <- c("Sham", "Low", "High")
-CoV <- as.numeric(c(0.899, 1.630, 2.511))
+CV <- as.numeric(c(0.899, 1.630, 2.511))
 ab.pv <- as.numeric(c(0.04156784, 0.14716858, 0.18885516))
 ab.cv <- as.numeric(c(0.03997555, 0.17202405, 0.26176249))
 mean_sus <- as.numeric(c(1.181, 0.446, 0.192))
@@ -1200,15 +1204,17 @@ dpi <- 41
 
 
 
-het.df <- data.frame(dose, CoV, mean_sus, ab.pv, ab.cv, dpi, mean_ab)
+het.df <- data.frame(dose, CV, mean_sus, ab.pv, ab.cv, dpi, mean_ab)
 
 het.df$mean_sus_inv <- 1/het.df$mean_sus
+
+#hawley et al 2024
 het.paper.only <- ggplot(het.df, aes(x=Metric))+
-    geom_point(size=3,aes(x="CoV", y=CoV, color=dose), shape = 15)+
-  geom_point(size=3.7,aes(x="CoV", y=CoV, shape = "CoV"), color="black", shape=0, stroke = 2)+
+    geom_point(size=3,aes(x="CV", y=CV, color=dose), shape = 17)+
+  geom_point(size=3.7,aes(x="CV", y=CV, shape = "CV"), color="black", shape=2, stroke = 1)+
   scale_color_manual(values=c(pri_colors))+
   scale_y_continuous(
-    name= "Variability in Susceptibility (CoV) Hawley et al. 2024"
+    name= "Variability in Susceptibility Hawley et al. 2024"
   )+
   theme_minimal()+
   theme(
@@ -1231,8 +1237,9 @@ ab.paper.only <- ggplot(het.df, x=Metric)+
   scale_shape_manual(values=c(17,19))+
   theme_minimal()+
   theme(
-    axis.title.y = element_text(color = "black", size=12, face = "bold")
-  ) +
+    axis.title.y = element_text(color = "black", size=12, face = "bold"),
+    legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))+
   labs(color = "Primary Treatment", shape= "Variability Metric")
 ab.paper.only
 ```
@@ -1316,7 +1323,7 @@ het.paper
 
  library(knitr)
 
-data <- data.frame(Dose = dose, 'Susceptibility_CV' = CoV, `Antibody_PV` = ab.pv, `Antibody_CV` = ab.cv)
+data <- data.frame(Dose = dose, 'Susceptibility_CV' = CV, `Antibody_PV` = ab.pv, `Antibody_CV` = ab.cv)
 
 data[, -1] <- round(data[, -1], 2)
 
@@ -1390,6 +1397,17 @@ pairs(emm_r)
 ----
 ```{r Remove birds that weren't recovered}
 #omit from dataset - were still infected (path load) on day 41 prior to reinfection day 42
+n.r <- m.ab %>%
+  filter(band_number %in% c(2274, 2514, 2469, 2520, 2494))%>%
+  dplyr::select(band_number, primary_treatment, dpi, secondary_dose, tes, quantity1)
+
+ggplot(n.r, aes(x=dpi, y=log10(quantity1), color=as.factor(band_number)))+
+  geom_path()+
+  geom_path(aes(x=dpi, y=tes))+
+  geom_hline(yintercept=log10(50))
+
+table(n.r)
+
 m.ab <- m.ab %>%
   filter(!(band_number %in% c(2274, 2514, 2469, 2520, 2494)))
 
@@ -1408,6 +1426,13 @@ wibird <- wibird %>% mutate(totalTES = sum())
 wibird$elisa_diff1 <- wibird$elisa_diff + 0.00001
 wibird$sec_dose.n <- wibird$secondary_dose+1
 wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits=2)
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec)%>%
+  tbl_summary(
+    by=secondary_dose
+  )
 
 m.ab %>%
   filter(dpi == 56) %>%
@@ -1481,15 +1506,19 @@ m.ab.w <- m.ab %>%
 wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
                                 names_glue = "{.value}_{dpi}",
                   values_from = elisa_od)
+wibird <- wibird %>%
+  drop_na(elisa_od_14)
+
+difference <- setdiff(wibird, wibird1)
+
 
 #could try scaling antibody levels to help w/ effect sizes: value - minimum / max - min 0 to 1
-# sc.wibird <- wibird %>%
-#   dplyr::select(band_number, primary_treatment, secondary_dose, inf_sec, log10.sec_dose, elisa_od_14)%>%
-#   drop_na(elisa_od_14)%>%
-#   group_by(band_number)%>%
-#   mutate(scaled_od_14 = (elisa_od_14 - min(elisa_od_14)) / (max(elisa_od_14) - min(elisa_od_14)))
-# 
-# sc.wibird$scaled_od_14
+min_val <- min(wibird$elisa_od_14)
+max_val <- max(wibird$elisa_od_14)
+
+# Scale elisa_od_14 to a range of 0 to 1
+wibird$scaled_elisa_od_14 <- (wibird$elisa_od_14 - min_val) / (max_val - min_val)
+
 wibird <- wibird %>% mutate(totalTES = sum())
 wibird$sec_dose.n <- wibird$secondary_dose+1
 wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits = 2)
@@ -1497,26 +1526,30 @@ wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits = 2)
 wibird$log10.sec_dose <- as.numeric(wibird$log10.sec_dose)
 
 # Replace NA values in elisa_od_14 with corresponding values from elisa_od_41
-wibird <- wibird %>% 
-  mutate(elisa_od_14_new = ifelse(is.na(elisa_od_14), elisa_od_41, elisa_od_14))
+# wibird <- wibird %>% 
+#   mutate(elisa_od_14_new = ifelse(is.na(elisa_od_14), elisa_od_41, elisa_od_14))
 
 glm.ab14.all <- glm(inf_sec ~ elisa_od_14*log10.sec_dose, data=wibird, family=binomial()) #Interaction is not significant
 glm.ab14 <- glm(inf_sec ~ elisa_od_14 + log10.sec_dose, data=wibird, family=binomial())
-glm.ab14.new <- glm(inf_sec ~ elisa_od_14_new + log10.sec_dose, data=wibird, family=binomial()) #Interaction is not significant
-summary(glm.ab14.new)
+glm.ab14.scaled <- glm(inf_sec ~ scaled_elisa_od_14 + log10.sec_dose, data=wibird, family=binomial())
+#glm.ab14.new <- glm(inf_sec ~ elisa_od_14_new + log10.sec_dose, data=wibird, family=binomial()) #Interaction is not significant
 
 AIC(glm.ab14.all, glm.ab14)
 summary(glm.ab14.all)
 summary(glm.ab14)
+summary(glm.ab14.scaled)
 
 car::Anova(glm.ab14, type = 3)
 simulateResiduals(glm.ab14, plot=T)
+car::Anova(glm.ab14.scaled, type = 3)
+simulateResiduals(glm.ab14.scaled, plot=T)
 
-mod <- glm.ab14
+mod <- glm.ab14.scaled
 dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
                     inf_sec=unique(wibird$inf_sec),
                     #elisa_od_14_new=unique(wibird$elisa_od_14_new),
-                    elisa_od_14 = unique(wibird$elisa_od_14))
+                    scaled_elisa_od_14 = unique(wibird$scaled_elisa_od_14))
+                   # elisa_od_14 = unique(wibird$elisa_od_14))
 dat.new$yhat=predict(mod, type="response", newdata = dat.new)
 #prediction intervals
 preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
@@ -1533,36 +1566,21 @@ dat.new <- transform(dat.new,
 wibird$secondary_dose_fct <- factor(wibird$secondary_dose, levels = c(0, 30, 100, 300, 7000))
 
 sec_dose_names <- c(
-  "0" = "Log10(0+1)",
-  "1.49" = "Log10(30+1)",
-  "2" = "Log10(100+1)",
-  "2.48" = "Log10(300+1)",
-  "3.85" = "Log10(7000+1)"
+  "0" = "0",
+  "1.49" = "30",
+  "2" = "100",
+  "2.48" = "300",
+  "3.85" = "7000"
 )
 
-#replacing NA with ELISA OD 41 Values
-# ggplot(wibird, aes(x=(elisa_od_14_new), y=(inf_sec), color=as.factor(log10.sec_dose)))+
-#   geom_line(data=dat.new, aes(x=(elisa_od_14_new), y=yhat), alpha = 1, size =1)+
-#    geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14_new, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
-#     geom_point(alpha=0.5, size=2)+
-#   scale_color_manual(values = c(sec_colors))+
-#     scale_fill_manual(values = c(sec_colors))+
-#   labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="log10(Secondary Dose + 1)", fill ="log10(Secondary Dose + 1)")+
-#   scale_x_continuous(name = "Antibody Levels Day 14",
-#                      labels = scales::number_format(accuracy = 0.01))+
-#   #scale_x_reverse()+
-#   #scale_y_reverse()+
-#   theme_minimal()+
-#   theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-#   facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)
-
-ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)))+
-  geom_line(data=dat.new, aes(x=(elisa_od_14), y=yhat), alpha = 1, size =1)+
-   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+#scaled
+ggplot(wibird, aes(x=(scaled_elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_line(data=dat.new, aes(x=(scaled_elisa_od_14), y=yhat), alpha = 1, size =1)+
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= scaled_elisa_od_14, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
     geom_point(alpha=0.5, size=2)+
-  scale_color_manual(values = c(sec_colors))+
-    scale_fill_manual(values = c(sec_colors))+
-  labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="log10(Secondary Dose + 1)", fill ="log10(Secondary Dose + 1)")+
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+    scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="Secondary Dose", fill ="Secondary Dose")+
   scale_x_continuous(name = "Antibody Levels Day 14",
                      labels = scales::number_format(accuracy = 0.01))+
   #scale_x_reverse()+
@@ -1571,11 +1589,40 @@ ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)
   theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position="top",
         legend.background= element_rect(size=0.25, linetype="solid"))+
-  facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)
+  facet_wrap(~log10.sec_dose, nrow=1, labeller = as_labeller(sec_dose_names))
+
+#not scaled
+ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_line(data=dat.new, aes(x=(elisa_od_14), y=yhat), alpha = 1, size =1)+
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+    geom_point(alpha=0.5, size=2)+
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+    scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="Secondary Dose", fill ="Secondary Dose")+
+  scale_x_continuous(name = "Antibody Levels Day 14",
+                     labels = scales::number_format(accuracy = 0.01))+
+  #scale_x_reverse()+
+  #scale_y_reverse()+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))+
+  facet_wrap(~log10.sec_dose, nrow=1)
+
+#ggsave('sus_ab_14.jpeg', width=6, height=4, units='in')
 
 ```
 
 ```{r Are antibody levels on day 41 predictive of susceptibility upon secondary challenge}
+wibird <- wibird %>%
+  drop_na(elisa_od_41)
+
+
+#scale
+min_val <- min(wibird$elisa_od_41)
+max_val <- max(wibird$elisa_od_41)
+wibird$scaled_elisa_od_41 <- (wibird$elisa_od_41 - min_val) / (max_val - min_val)
+
 glm.ab41 <- glm(inf_sec ~ elisa_od_41 + log10.sec_dose, data=wibird, family=binomial())
 glm.ab41.int <- glm(inf_sec ~ elisa_od_41 * log10.sec_dose, data=wibird, family=binomial())
 summary(glm.ab41.int)
@@ -1584,37 +1631,61 @@ car::Anova(glm.ab41, type = 3)
 simulateResiduals(glm.ab41, plot=T)
 
 
+glm.ab41.scaled <- glm(inf_sec ~ scaled_elisa_od_41 + log10.sec_dose, data=wibird, family=binomial())
+summary(glm.ab41.scaled)
+
+mod <- glm.ab41.scaled
 dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
                     inf_sec=unique(wibird$inf_sec),
-                    elisa_od_41=unique(wibird$elisa_od_41))#new grid to put predictions into
-dat.new$yhat=predict(glm.ab41, type="response", newdata = dat.new)
+                    #elisa_od_14_new=unique(wibird$elisa_od_14_new),
+                    scaled_elisa_od_41 = unique(wibird$scaled_elisa_od_41))
+                    #elisa_od_41 = unique(wibird$elisa_od_14))
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
 #prediction intervals
-preds = predict(glm.ab41, type = "link", newdata = dat.new, se.fit =T)
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
 #bind se's and fitted points
 dat.new = cbind(dat.new, preds)
 #inverse link function
-ilink <- family(glm.ab41)$linkinv
+ilink <- family(mod)$linkinv
 #back transform CIs
 dat.new <- transform(dat.new,
                      Fitted = ilink(fit),
                      Upper = ilink(fit + (2*se.fit)),
                      Lower = ilink(fit - (2*se.fit)))
 
+#scaled
+ggplot(wibird, aes(x=(scaled_elisa_od_41), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_point(alpha=0.5)+
+  geom_line(data=dat.new, aes(x=(scaled_elisa_od_41), y=yhat), alpha = 1, size =1)+
+   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= scaled_elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+    scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="Secondary Dose", fill ="Secondary Dose")+
+  scale_x_continuous(name = "Antibody Levels Day 41",
+                     labels = scales::number_format(accuracy = 0.01))+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="top",
+        legend.background= element_rect(size=0.25, linetype="solid"))+
+  facet_wrap(~log10.sec_dose, nrow=1, labeller = as_labeller(sec_dose_names))
+
+#not scaled
 ggplot(wibird, aes(x=(elisa_od_41), y=(inf_sec), color=as.factor(log10.sec_dose)))+
   geom_point(alpha=0.5)+
   geom_line(data=dat.new, aes(x=(elisa_od_41), y=yhat), alpha = 1, size =1)+
    geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) + 
-  scale_color_manual(values = c(sec_colors))+
-    scale_fill_manual(values = c(sec_colors))+
-  labs(x="Antibody Levels Day 41", y= "Susceptibility (Secondary Infection 0|1)", color="log10(Secondary Dose)", fill ="log10(Secondary Dose)")+
-facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)+
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+    scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(x="Antibody Levels Day 14", y= "Susceptibility (Infected 1|0)", color="Secondary Dose", fill ="Secondary Dose")+
   scale_x_continuous(name = "Antibody Levels Day 41",
                      labels = scales::number_format(accuracy = 0.01))+
-  #scale_x_reverse()+
   theme_minimal()+
-    theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position="top",
-        legend.background= element_rect(size=0.25, linetype="solid"))
+        legend.background= element_rect(size=0.25, linetype="solid"))+
+  facet_wrap(~log10.sec_dose, nrow=1, labeller = as_labeller(sec_dose_names))
+
+#ggsave('sus_ab_41.jpeg', width=6, height=4, units='in')
 
 ```
 ```{r do baseline antibody levels predict susceptibility}
@@ -1624,16 +1695,29 @@ car::Anova(glm.ab.pre, type = 3)
 simulateResiduals(glm.ab.pre, plot=T)
 
 
+#could try scaling antibody levels to help w/ effect sizes: value - minimum / max - min 0 to 1
+min_val <- min(wibird$`elisa_od_-8`)
+max_val <- max(wibird$`elisa_od_-8`)
+
+# Scale elisa_od_14 to a range of 0 to 1
+wibird$`scaled_elisa_od_-8` <- (wibird$`elisa_od_-8` - min_val) / (max_val - min_val)
+
+glm.ab.pre.scaled <- glm(inf_sec ~ `scaled_elisa_od_-8` + log10.sec_dose, data=wibird, family=binomial())
+
+summary(glm.ab.pre.scaled)
+
+mod <- glm.ab.pre
 dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
                     inf_sec=unique(wibird$inf_sec),
-                    `elisa_od_-8`=unique(wibird$`elisa_od_-8`))#new grid to put predictions into
-dat.new$yhat=predict(glm.ab.pre, type="response", newdata = dat.new)
+                    `elisa_od_-8`=unique(wibird$`elisa_od_-8`))
+                    #`scaled_elisa_od_-8` = unique(wibird$`scaled_elisa_od_-8`))#new grid to put predictions into
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
 #prediction intervals
-preds = predict(glm.ab.pre, type = "link", newdata = dat.new, se.fit =T)
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
 #bind se's and fitted points
 dat.new = cbind(dat.new, preds)
 #inverse link function
-ilink <- family(glm.ab.pre)$linkinv
+ilink <- family(mod)$linkinv
 #back transform CIs
 dat.new <- transform(dat.new,
                      Fitted = ilink(fit),
@@ -1654,8 +1738,10 @@ facet_wrap(~log10.sec_dose,labeller = as_labeller(sec_dose_names), nrow=1)+
   theme_minimal()+
     theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position="top",
-        legend.background= element_rect(size=0.25, linetype="solid"))
+        legend.background= element_rect(size=0.25, linetype="solid"),
+        legend.label = as_labeller(sec_dose_names))
 
+ggsave('sus_ab_pre.jpeg', width=6, height=4, units='in')
 ```
 
 ```{r}
