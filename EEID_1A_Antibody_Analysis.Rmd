@@ -337,6 +337,9 @@ ggplot(diseased_duration, aes(x=diseased_duration, y=primary_treatment, color=fc
 
 p.ab <- m.ab %>%
   filter(dpi <=41)
+
+
+ggplot()
 ```
 
 I use a gamma distribution for the antibody data
@@ -1464,16 +1467,6 @@ ggplot(m.ab, aes(x=dpi, y=elisa_od, color=as.factor(secondary_dose)))+
   labs(x="Days Post Infection", y="Antibody Levels", color="Secondary Dose")+
   facet_wrap(~primary_treatment)
 
-#ab levels dpi 56
-ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, color=as.factor(secondary_dose)))+
-  geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
-  geom_boxplot(outlier.shape = NA)+
-  geom_jitter(aes(color=as.factor(secondary_dose)), size=1.5, shape=1, alpha=0.75)+
-  labs(x="Primary Treatment", y="ELISA OD", fill="Treatment")+
-  stat_summary(aes(group=secondary_dose), fun=mean, shape = 18, size=.5)+
-  scale_color_manual(values=sec_colors)+
-  labs(title = "Antibody Levels Post-Secondary Infection", y= "Antibody Levels", x="Secondary Dose", color="Secondary Dose", shape="Secondary Dose")+
-  facet_wrap(~primary_treatment)
 
 #birds that had MG primary then sham secondary to look at "waning" antibody levels
 mg.sham <- m.ab %>%
@@ -1490,6 +1483,8 @@ ggplot(mg.sham%>% filter(dpi %in% c(-8, 14, 41, 56)), aes(x=dpi, y=elisa_od, col
 #   geom_hline(yintercept=log10(50))+
 #   facet_wrap(~inf_sec)
 ```
+
+
 ```{r Are antibody levels on day 14 predictive of susceptibility upon secondary challenge}
 band_number_summary <- m.ab %>%
   group_by(inf_sec, primary_treatment, secondary_treatment) %>%
@@ -1509,7 +1504,7 @@ wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
 wibird <- wibird %>%
   drop_na(elisa_od_14)
 
-difference <- setdiff(wibird, wibird1)
+#difference <- setdiff(wibird, wibird1)
 
 
 #could try scaling antibody levels to help w/ effect sizes: value - minimum / max - min 0 to 1
@@ -1588,7 +1583,7 @@ ggplot(wibird, aes(x=(scaled_elisa_od_14), y=(inf_sec), color=as.factor(log10.se
   theme_minimal()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position="top",
-        legend.background= element_rect(size=0.25, linetype="solid"))+
+        legend.background= element_rect(size=0.25, linetype="solid"))#+
   facet_wrap(~log10.sec_dose, nrow=1, labeller = as_labeller(sec_dose_names))
 
 #not scaled
@@ -1610,6 +1605,79 @@ ggplot(wibird, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)
   facet_wrap(~log10.sec_dose, nrow=1)
 
 #ggsave('sus_ab_14.jpeg', width=6, height=4, units='in')
+
+```
+
+```{r Antibody levels secondary}
+
+#ab levels dpi 56
+ggplot(m.ab%>%filter(dpi==56), aes(x=as.factor(secondary_dose), y=elisa_od, color=as.factor(secondary_dose)))+
+  geom_hline(yintercept=0.061, linetype="dashed", alpha=0.5)+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(aes(color=as.factor(secondary_dose)), size=1.5, shape=1, alpha=0.75)+
+  labs(x="Primary Treatment", y="ELISA OD", fill="Treatment")+
+  stat_summary(aes(group=secondary_dose), fun=mean, shape = 18, size=.5)+
+  scale_color_manual(values=sec_colors)+
+  labs(title = "Antibody Levels Post-Secondary Infection", y= "Antibody Levels", x="Secondary Dose", color="Secondary Dose", shape="Secondary Dose")+
+  facet_grid(~inf_sec~primary_treatment)+
+  theme_minimal()
+
+#do antibody levels on day 14 predict antibody levels on day 56?
+m.ab.w1 <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                          sex, elisa_od, inf_sec)%>%
+  filter(dpi %in% c(-8, 14, 41, 56))
+
+wibird1 <- m.ab.w1 %>% pivot_wider(names_from = dpi,
+                                names_glue = "{.value}_{dpi}",
+                  values_from = elisa_od)
+wibird1 <- wibird1 %>%
+  drop_na(elisa_od_14, elisa_od_41, elisa_od_56)
+wibird1$sec_dose.n <- wibird1$secondary_dose+1
+wibird1$log10.sec_dose <- round(log10(wibird1$sec_dose.n), digits = 2)
+
+
+a<- ggplot(wibird1, aes(x=elisa_od_41, y=elisa_od_56, shape=primary_treatment, color=as.factor(secondary_dose)))+
+  geom_point()+
+  facet_grid(~inf_sec~primary_treatment)
+
+b <-ggplot(wibird1, aes(x=elisa_od_14, y=elisa_od_56, shape=primary_treatment, color=as.factor(secondary_dose)))+
+  geom_point()+
+  facet_grid(~inf_sec~primary_treatment)
+
+a+b
+wibird1$inf_sec <- as.factor(wibird1$inf_sec)
+lmx <- glmmTMB(elisa_od_56 ~ inf_sec + log10.sec_dose, data=wibird1, family=Gamma())
+summary(lmx)
+
+simulateResiduals(lmx, plot=T)
+
+mod <- lmx
+dat.new=expand.grid(#log10.sec_dose=unique(wibird1$log10.sec_dose),
+                    inf_sec=unique(wibird1$inf_sec),
+                    #elisa_od_14_new=unique(wibird$elisa_od_14_new),
+                    elisa_od_56 = unique(wibird1$elisa_od_56),
+                    log10.sec_dose = seq(min(wibird1$log10.sec_dose), max(wibird1$log10.sec_dose), length.out = 100))
+                    #elisa_od_41 = unique(wibird$elisa_od_14))
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(mod)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+ggplot(wibird1, aes(x=log10.sec_dose, y=elisa_od_56))+
+  geom_point(aes(color=fct_rev(inf_sec)))+
+  geom_line(data=dat.new, aes(x=log10.sec_dose, y=yhat, color=fct_rev(inf_sec)))+
+  geom_ribbon(data=dat.new, aes(x=log10.sec_dose, y=yhat, ymin=Lower, ymax=Upper, color=fct_rev(inf_sec)), alpha=0.25, lty="dashed")+
+  facet_grid(~inf_sec)+
+    theme_minimal()
 
 ```
 
@@ -1666,7 +1734,7 @@ ggplot(wibird, aes(x=(scaled_elisa_od_41), y=(inf_sec), color=as.factor(log10.se
   theme_minimal()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1), 
         legend.position="top",
-        legend.background= element_rect(size=0.25, linetype="solid"))+
+        legend.background= element_rect(size=0.25, linetype="solid"))#+
   facet_wrap(~log10.sec_dose, nrow=1, labeller = as_labeller(sec_dose_names))
 
 #not scaled
@@ -1789,6 +1857,7 @@ diseased_duration_sec <- m.ab %>%
   summarize(diseased_duration = ifelse(sum(diseased == 1) == 0, 0, last(dpi[diseased == 1] + 1) - first(dpi[diseased == 1])))
 
 diseased_duration_sec$log10.sec_dose <- round(log10(diseased_duration_sec$secondary_dose+1), digits = 2)
+
 
 lm.dd.s <- glm.nb(diseased_duration ~ primary_treatment+log10.sec_dose, data=diseased_duration_sec)
 summary(lm.dd.s)

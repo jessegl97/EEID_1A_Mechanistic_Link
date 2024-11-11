@@ -1,0 +1,1227 @@
+---
+title: "Host_Response_Variability"
+author: "Jesse Garrett-Larsen"
+date: "2024-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load Packages}
+rm(list=ls())
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(glmmTMB)
+library(effects)
+library(AICcmodavg)
+library(emmeans)
+library(MASS)
+library(DHARMa)
+library(lme4)
+library(purrr)
+#install.packages("remotes")
+#remotes::install_github("T-Engel/CValternatives")
+library(CValternatives)
+library(patchwork)
+library(gridExtra)
+library(car)
+library(ineq)
+library(ggh4x)
+```
+
+```{r Import Data}
+source("dataCleaning_EEID1A.R")
+```
+
+```{r Format Theme}
+#set colors for primary treatment
+pri_colors <- c("#1B9E77", "#7570B3", "#D95F02")
+#set color scheme secondary treatment
+sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
+#set theme
+theme_set(theme_minimal())
+```
+
+```{r Raw Data Sample Sizes}
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )%>%
+  modify_header(
+    label ~ "**All Birds Before Removal**"
+  )
+```
+
+####Generate Infection Data + Format For Analysis
+Rules: A bird is considered infected if it had an eye score > 0.5 for more than one day, a pathogen load > 50 copies, or both
+```{r Threshold Cutoffs}
+m.ab$threshold_cutoff = 50
+m.ab$seropos_cutoff = 0.061
+m.ab$pathology_cutoff = 0
+```
+
+inf = if quantity (where any NA is replaced with 0) is greater than cutoff of 50 copies OR total eye score (where any NAs are ignored) is greater than 0.5 for more than one consecutive sampling day, or total eye score is greater or equal to 1 for at least one day, return 1, else return 0
+```{r Generate Infection Data}
+m.ab <- m.ab %>%
+  # Sort data by band_number and dpi
+  arrange(band_number, dpi) %>%
+  # Replace NA values for quantity only
+  mutate(quantity_clean = coalesce(quantity, 0)) %>%
+  # Flag as infected if quantity > 50 on any single day
+  mutate(quantity_flag = ifelse(quantity_clean > 50, 1, 0)) %>%
+  # Check consecutive days for tes > 0.5, ignoring NAs for tes
+  group_by(band_number) %>%
+  mutate(
+    tes_flag = ifelse(tes > 0.5 & !is.na(tes), 1, 0),
+    tes_consecutive = tes_flag + lag(tes_flag, default = 0),
+    tes_single_high = ifelse(tes >= 1 & !is.na(tes), 1, 0)
+  ) %>%
+  # Combine the three criteria: quantity > 50 OR tes > 0.5 on consecutive days OR tes >= 1 on any day
+  mutate(inf = ifelse(quantity_flag == 1 | tes_consecutive > 1 | tes_single_high == 1, 1, 0)) %>%
+  # Calculate inf_pri and inf_sec based on dpi
+  ungroup() %>%
+  group_by(band_number) %>%
+  mutate(
+    inf_pri = ifelse(any(inf == 1 & dpi < 42), 1, 0),
+    inf_sec = ifelse(any(inf == 1 & dpi > 42), 1, 0)
+  ) %>%
+  # Un-group the data if needed
+  ungroup() %>%
+  # Select relevant columns (optional)
+  select(-quantity_clean, -quantity_flag, -tes_flag, -tes_consecutive, -tes_single_high)
+```
+
+```{r Omit Birds}
+#n=10
+prob_birds <- m.ab %>% filter(band_number %in% c(2274, 2514, 2469, 2520, 2494, 2452, 2562, 2419, 2434, 2505))%>%
+  select(band_number, dpi, primary_treatment, secondary_dose, quantity, tes, l_eye_score, r_eye_score, elisa_od)
+
+prob_birds %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(by=dpi)%>%
+  modify_header(
+    label ~ "**Birds to Remove**"
+  )
+
+#omit 2505 from data set for analysis as it was positive at quarantine (n=1)
+m.ab <- m.ab %>%
+  filter(band_number != 2505)
+
+#omit 2452 and 2562 bc positive qpcr and they are shams (n=2)
+m.ab <- m.ab %>% filter(!band_number %in% c(2452, 2562)) 
+
+#omit sham birds with eye scores (0.5) (2419, 2434) (n=2)
+m.ab <- m.ab %>% filter(!band_number %in% c(2419, 2434))
+
+#omit sham bird with path load (2514) (n=1)
+m.ab <- m.ab %>% filter(band_number != 2514)
+
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  ) %>%
+  modify_header(
+    label ~ "**Sample Sizes for Primary Analysis**"
+  )
+#Final Primary Sample Sizes: Sham = 46; Low = 51; High = 53
+```
+
+```{r Idenity Birds to Remove For Secondary}
+##Some birds did not fully recover after primary infection. These birds were included in primary analysis, but will be excluded from secondary analysis. I have identified these birds below, but *will not remove them until secondary analysis*.
+
+#check birds that were not recovered by secondary infection: 2274, 2469, 2520, 2494 (2514 not recovered but omitted above)
+not_recovered <- m.ab %>% 
+  filter(band_number %in% c(2274, 2469, 2520, 2494))%>%
+  dplyr::select(band_number, dpi, primary_treatment, secondary_dose, quantity, tes)
+```
+
+####Primary Challenge
+```{r Final Primary Sample Size}
+m.ab %>%
+  dplyr::select(dpi, primary_treatment)%>%
+  tbl_summary(
+    by=dpi
+  ) %>%
+  modify_header(
+    label ~ "**PRIMARY ANALYSIS FINAL SAMPLE SIZES**"
+  )
+```
+
+```{r p.ab Data Frame With Only Primary Infection}
+#data frame with only primary infection
+p.ab <- m.ab %>%
+  filter(dpi <=41)
+```
+
+####Antibody Levels Across Primary Treatment
+```{r Antibody Dataframe}
+
+#add small constant to total eye score for calculation of variability
+p.ab$tes.new <- p.ab$tes + .01
+#new df with only individuals that were infected any time during primary challenge
+p.ab$dpi.f <- as.factor(p.ab$dpi)
+
+#df with infected primary individuals only
+p.abi <- p.ab %>%
+  filter(inf_pri == 1)%>%
+  dplyr::select(dpi.f, dpi, primary_treatment, tes.new, elisa_od, quantity1, sex, band_number, inf_pri)
+
+#df with all individuals during primary challenge
+p.aba <-  p.ab %>%
+  dplyr::select(dpi.f, dpi, primary_treatment, tes.new, elisa_od, quantity1, sex, band_number, inf_pri)
+```
+
+```{r Functions to calculate variability}
+# Define functions for calculating CV, PV, and V2
+calculate_cv <- function(data) {
+  return(sd(data) / mean(data))
+}
+
+# Function to calculate gamma CV
+calculate_gamma_cv <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return(1 / sqrt(shape))
+    }
+  }
+  return(NA)
+}
+
+calculate_pv <- function(data) {
+  return(PV(data))
+}
+
+calculate_v2 <- function(data) {
+  mean_x <- mean(data)
+  sd_x <- sd(data)
+  v2 <- sd_x^2 / (sd_x^2 + mean_x^2)
+  return(v2)
+}
+
+# Function to calculate gamma V2
+calculate_gamma_v2 <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return((1 + shape)^(-1/2))
+    }
+  }
+  return(NA)
+}
+
+# Function to calculate Gini coefficient using pairwise method
+calculate_gini <- function(data) {
+  data <- na.omit(data)
+  n <- length(data)
+  if (n < 2) {
+    return(NA)
+  }
+  mean_data <- mean(data)
+  diff_sum <- sum(outer(data, data, FUN = function(x, y) abs(x - y)))
+  gini <- diff_sum / (2 * n^2 * mean_data)
+  return(gini)
+}
+```
+
+```{r custom theme for variability}
+# Custom theme function for faceted pathogen load plots
+theme_primary_facet <- function() {
+  list(
+    # Facet with custom strip background colors
+    facet_wrap2(
+      ~ primary_treatment,
+      scales = "free_x",
+      strip = strip_themed(
+        background_x = elem_list_rect(
+          fill = c("Sham" = "#1B9E77", "Low" = "#7570B3", "High" = "#D95F02")
+        )
+      )
+    ),
+    
+    # Custom theme adjustments
+    theme_bw()+
+    theme(
+      strip.text.x = element_text(size = 12, color = "white", face = "bold")
+    )
+  )
+}
+
+#Only Low and High Secondary
+theme_primary_facet_lh <- function() {
+  list(
+    # Facet with custom strip background colors
+    facet_wrap2(
+      ~ primary_treatment,
+      scales = "free_x",
+      strip = strip_themed(
+        background_x = elem_list_rect(
+          fill = c("Low" = "#7570B3", "High" = "#D95F02")
+        )
+      )
+    ),
+    
+    # Custom theme adjustments
+    theme_bw()+
+    theme(
+      strip.text.x = element_text(size = 12, color = "white", face = "bold")
+    )
+  )
+}
+```
+
+```{r Calculate variability for Gamma Distributed Antibodies Primary Treatment}
+# Set the number of bootstrap replicates
+n_boot <- 1000
+
+# Main pipeline to calculate gamma CV, gamma V2, Gini coefficient, and PV
+a.gcv <- p.aba %>%
+  filter(dpi.f %in% c(-8, 14, 41))%>%
+  group_by(dpi.f, primary_treatment) %>%
+  tidyr::drop_na(elisa_od) %>%
+  dplyr::reframe(
+    elisa_od = elisa_od,
+    mean_od = mean(elisa_od, na.rm = TRUE),
+    bird_sd = sd(elisa_od, na.rm = TRUE),
+    band_number = band_number,
+    
+    # Calculating gamma CV, V2, Gini coefficient, and PV for the original data
+    bird_gamma_cv = calculate_gamma_cv(elisa_od),
+    bird_cv = calculate_cv(elisa_od),
+    bird_gamma_V2 = calculate_gamma_v2(elisa_od),
+    bird_V2 = calculate_v2(elisa_od),
+    bird_gini = calculate_gini(elisa_od),
+    bird_pv = calculate_pv(elisa_od),
+    
+    # Bootstrap for gamma CV, V2, Gini coefficient, and PV
+    gamma_cv_bootstrap = list(replicate(n_boot, calculate_gamma_cv(sample(elisa_od, replace = TRUE)))),
+    cv_bootstrap  = list(replicate(n_boot, calculate_cv(sample(elisa_od, replace = TRUE)))),
+    gamma_V2_bootstrap = list(replicate(n_boot, calculate_gamma_v2(sample(elisa_od, replace = TRUE)))),
+    gini_bootstrap = list(replicate(n_boot, calculate_gini(sample(elisa_od, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(elisa_od, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals
+  mutate(
+    gamma_cv_lower_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_V2_lower_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_V2_upper_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gini_lower_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gini_upper_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975))
+  ) %>%
+  # Optionally, remove bootstrap columns to clean up the dataset
+  select(-gamma_cv_bootstrap, -cv_bootstrap, -gamma_V2_bootstrap, -gini_bootstrap, -pv_bootstrap) %>%
+  ungroup()
+
+# Join results with the original data
+p.aba.g <- left_join(p.aba, a.gcv, by = c("dpi.f", "primary_treatment", "band_number")) %>%
+  select(-elisa_od.y) %>%
+  mutate(elisa_od = elisa_od.x) %>%
+  select(-elisa_od.x) %>%
+  filter(dpi.f %in% c(-8, 14, 41))
+
+# Summary table with mean statistics
+summary_tibble_gamma <- a.gcv %>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    mean_bird_pv = mean(bird_pv, na.rm=TRUE),
+    mean_bird_cv = mean(bird_cv, na.rm=TRUE),
+    mean_bird_gamma_cv = mean(bird_gamma_cv, na.rm = TRUE),
+    mean_bird_V2 = mean(bird_V2, na.rm=TRUE),
+    mean_bird_gamma_V2 = mean(bird_gamma_V2, na.rm = TRUE),
+    mean_bird_gini = mean(bird_gini, na.rm = TRUE),   # Mean Gini coefficient
+    mean_bird_sd = mean(bird_sd, na.rm = TRUE),
+    avg_elisa_od = mean(elisa_od, na.rm = TRUE),
+    avg_gamma_cv_lower_ci = mean(gamma_cv_lower_ci, na.rm = TRUE),
+                avg_gamma_cv_upper_ci = mean(gamma_cv_upper_ci, na.rm = TRUE),
+                avg_cv_lower_ci = mean(cv_lower_ci, na.rm = TRUE),
+                avg_cv_upper_ci = mean(cv_upper_ci, na.rm = TRUE),
+                avg_gamma_V2_lower_ci = mean(gamma_V2_lower_ci, na.rm = TRUE),
+                avg_gamma_V2_upper_ci = mean(gamma_V2_upper_ci, na.rm = TRUE),
+                avg_gini_lower_ci = mean(gini_lower_ci, na.rm = TRUE),
+                avg_gini_upper_ci = mean(gini_upper_ci, na.rm = TRUE),
+                avg_pv_lower_ci = mean(pv_lower_ci, na.rm = TRUE),
+                avg_pv_upper_ci = mean(pv_upper_ci, na.rm = TRUE),
+    n_individuals = n_distinct(band_number)
+  ) %>%
+  as_tibble()
+
+print(summary_tibble_gamma)
+
+
+# Prepare Lorenz data for all combinations of primary_treatment and dpi.f
+lorenz_data <- p.aba %>%
+  filter(!is.na(elisa_od)) %>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    lorenz_p = list(Lc(elisa_od)$p),    # Cumulative share of individuals
+    lorenz_L = list(Lc(elisa_od)$L),    # Cumulative share of antibody levels
+    .groups = 'drop'
+  ) %>%
+  unnest(cols = c(lorenz_p, lorenz_L))
+
+# Plot Lorenz curves for all combinations with primary_treatment as color
+ggplot(lorenz_data, aes(x = lorenz_p, y = lorenz_L, color = primary_treatment)) +
+  geom_line(size = 1) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey") +
+  facet_wrap(~ dpi.f, scales = "free_y") +
+  labs(
+    title = "Lorenz Curves for Antibody Levels by Treatment and DPI",
+    x = "Cumulative Share of Individuals",
+    y = "Cumulative Share of Antibody Levels",
+    color = "Primary Treatment"
+  ) +
+  scale_color_manual(values = pri_colors)+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+```{r Visualize CV for Gamma Distributed Antibodies}
+# Set a slightly larger dodge width for better separation
+dodge_width <- 0.4
+
+ggplot() +
+  # Plotting mean PV with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_pv, color = "PV"), size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = a.gcv, aes(x = dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, color = "PV"), linetype = "solid", width = 0.0, alpha = 0.5, position = position_dodge(width = 0.4)) +
+  
+  # Plotting mean gamma CV with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_gamma_cv, color = "Gamma CV"), size = 3, alpha=0.75) +
+  # geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_gamma_cv, ymin = gamma_cv_lower_ci, ymax = gamma_cv_upper_ci, color = "Gamma CV"), linetype = "dotted", position = position_dodge(width = 0.25), width = 0.01) +
+  
+  # Plotting mean CV with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_cv, color = "CV"), size = 3, alpha=0.75) +
+  # geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_cv, ymin = cv_lower_ci, ymax = cv_upper_ci, color = "CV"), linetype = "dotted", position = position_dodge(width = 0.25), width = 0.01) +
+  
+  # Plotting mean V2 with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_V2, color = "V2"), size = 3, alpha=0.75) +
+  # geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_cv, ymin = V2_lower_ci, ymax = V2_upper_ci, color = "V2"), linetype = "dotted", position = position_dodge(width = 0.25), width = 0.01) +
+  
+  # Plotting mean gamma V2 with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_gamma_V2, color = "Gamma V2"), size = 3, position = position_dodge(width = dodge_width), alpha=0.75) +
+  # geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_gamma_V2, ymin = gamma_V2_lower_ci, ymax = gamma_V2_upper_ci, color = "Gamma V2"), linetype = "dashed", position = position_dodge(width = 0.4), width = 0.01) +
+
+  # Plotting mean Gini coefficient with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_gini, color = "Gini Coefficient"), size = 3, position = position_dodge(width = dodge_width), alpha=0.75) +
+  # geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_gini, ymin = gini_lower_ci, ymax = gini_upper_ci, color = "Gini Coefficient"), linetype = "dotdash", position = position_dodge(width = 0.4), width = 0.01) +
+
+  # Custom colors and shapes
+
+  scale_color_manual(values = c( "PV" = "black", "Gamma CV" = "#94BFA7", "CV" ="#3E7CB1", "Gamma V2" = "#FF70A6", "V2" = "#5B5941", "Gini Coefficient" = "#FF9770"))+
+  
+  # Labels
+  labs(y = "Variability Metrics (Gamma CV, CV, Gamma V2, V2, PV, Gini)", x = "Days Post Inoculation", title = "Antibody Variability Metrics by DPI and Treatment", color = "Metric", shape = "Primary Treatment") +
+  
+  # Legends and themes
+ 
+  facet_wrap(~primary_treatment)+
+   theme_primary_facet()
+
+
+```
+
+
+
+```{r Visualize CV for Gamma Distributed Antibodies}
+# Add CI columns for each metric if not already present in long_summary
+long_summary <- summary_tibble_gamma %>%
+  pivot_longer(
+    cols = starts_with("mean_bird"), 
+    names_to = "metric", 
+    values_to = "value"
+  ) %>%
+  # Add corresponding lower and upper CI columns in long format
+  mutate(
+    lower_ci = case_when(
+      metric == "mean_bird_gamma_cv" ~ avg_gamma_cv_lower_ci,
+      metric == "mean_bird_cv" ~ avg_cv_lower_ci,
+      metric == "mean_bird_gamma_V2" ~ avg_gamma_V2_lower_ci,
+      metric == "mean_bird_pv" ~ avg_pv_lower_ci,
+      metric == "mean_bird_gini" ~ avg_gini_lower_ci
+    ),
+    upper_ci = case_when(
+      metric == "mean_bird_gamma_cv" ~ avg_gamma_cv_upper_ci,
+      metric == "mean_bird_cv" ~ avg_cv_upper_ci,
+      metric == "mean_bird_gamma_V2" ~ avg_gamma_V2_upper_ci,
+      metric == "mean_bird_pv" ~ avg_pv_upper_ci,
+      metric == "mean_bird_gini" ~ avg_gini_upper_ci
+    )
+  )
+
+ggplot(long_summary, aes(x = dpi.f, y = value, color = metric, shape = metric)) +
+  geom_point(size = 3, position = position_dodge(width = 1.25)) +
+  geom_errorbar(
+    aes(ymin = lower_ci, ymax = upper_ci),  # No need to specify x or y again in aes
+    width = 0.2,
+    position = position_dodge(width = 1.25),
+    linetype = "dashed"
+  ) +
+  scale_color_manual(
+    values = c("mean_bird_pv" = "black", "mean_bird_gamma_cv" = "#94BFA7", "mean_bird_cv" ="#3E7CB1", "mean_bird_gamma_V2" = "#FF70A6", "mean_bird_v2" = "#5B5941", "mean_bird_gini" = "#FF9770"),
+  labels = c("CV", "Gamma CV", "Gamma V2", "Gini", "PV", "V2"))+ 
+  scale_shape_manual(
+    values = c("mean_bird_gamma_cv" = 21, "mean_bird_cv" = 2, "mean_bird_gamma_V2" = 22, "mean_bird_pv" = 16, "mean_bird_gini" = 23, "mean_bird_v2" = 0),
+    labels = c("CV", "Gamma CV", "Gamma V2", "Gini", "PV", "V2"))+  # Custom names for shapes
+  labs(y = "Variability Metrics", x = "Days Post Infection", title = "Antibody Variability Metrics by DPI and Treatment", shape = "Metric", color="Metric") +
+  facet_wrap(~primary_treatment)+
+  theme_primary_facet() +
+   theme(
+    legend.position = "top",
+        plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.box = "vertical"  # Arrange legends in a vertical layout
+  ) 
+```
+
+```{r Calculate Variability in eye score Primary}
+#Don't use gamma distributed bc data aren't gamma distributed 
+#eye score
+e.cv <- p.aba %>%
+ group_by(dpi.f, primary_treatment) %>%
+  drop_na(tes.new) %>%
+  filter(inf_pri ==1)%>%
+  dplyr::reframe(
+    tes.new = tes.new,
+    mean_tes = mean(tes.new, na.rm = TRUE),
+    bird_sd = sd(tes.new, na.rm = TRUE),
+    band_number = band_number,
+    
+    # Calculating gamma CV, V2, Gini coefficient, and PV for the original data
+    bird_cv = calculate_cv(tes.new),
+    bird_V2 = calculate_v2(tes.new),
+    bird_gini = calculate_gini(tes.new),
+    bird_pv = calculate_pv(tes.new),
+    
+    # Bootstrap for gamma CV, V2, Gini coefficient, and PV
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(tes.new, replace = TRUE)))),
+    V2_bootstrap = list(replicate(n_boot, calculate_v2(sample(tes.new, replace = TRUE)))),
+    gini_bootstrap = list(replicate(n_boot, calculate_gini(sample(tes.new, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(tes.new, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    V2_lower_ci = map_dbl(V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    V2_upper_ci = map_dbl(V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gini_lower_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gini_upper_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975))
+  ) %>%
+  # Optionally, remove bootstrap columns to clean up the dataset
+  select(-cv_bootstrap, -V2_bootstrap, -gini_bootstrap, -pv_bootstrap) %>%
+  ungroup()
+
+# Join results with the original data
+p.aba.e <- left_join(p.aba, e.cv, by = c("dpi.f", "primary_treatment", "band_number")) %>%
+  select(-tes.new.y) %>%
+  mutate(tes.new = tes.new.x) %>%
+  select(-tes.new.x) %>%
+  filter(dpi.f %in% c(-8, 7, 41))
+
+# Summary table with mean statistics
+summary_tibble_tes <- e.cv %>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    mean_bird_cv = mean(bird_cv, na.rm = TRUE),
+    mean_bird_V2 = mean(bird_V2, na.rm = TRUE),
+    mean_bird_gini = mean(bird_gini, na.rm = TRUE),             # Mean Gini coefficient
+    mean_bird_sd = mean(bird_sd, na.rm = TRUE),
+    mean_bird_pv = mean(bird_pv, na.rm=TRUE),
+    avg_tes.new = mean(tes.new, na.rm = TRUE),
+    n_individuals = n_distinct(band_number),
+    
+    # Calculate the average lower and upper CIs for each metric
+    cv_lower_ci = mean(cv_lower_ci, na.rm = TRUE),
+    cv_upper_ci = mean(cv_upper_ci, na.rm = TRUE),
+    V2_lower_ci = mean(V2_lower_ci, na.rm = TRUE),
+    V2_upper_ci = mean(V2_upper_ci, na.rm = TRUE),
+    gini_lower_ci = mean(gini_lower_ci, na.rm = TRUE),
+    gini_upper_ci = mean(gini_upper_ci, na.rm = TRUE),
+    pv_lower_ci = mean(pv_lower_ci, na.rm = TRUE),
+    pv_upper_ci = mean(pv_upper_ci, na.rm = TRUE)
+  ) %>%
+  as_tibble()
+
+print(summary_tibble_tes)
+
+# Transform summary_tibble_tes to long format and add CI columns
+long_summary_tes <- summary_tibble_tes %>%
+  pivot_longer(
+    cols = starts_with("mean_bird"), 
+    names_to = "metric", 
+    values_to = "value"
+  ) %>%
+  # Add corresponding lower and upper CI columns in long format
+  mutate(
+    lower_ci = case_when(
+      metric == "mean_bird_cv" ~ cv_lower_ci,
+      metric == "mean_bird_V2" ~ V2_lower_ci,
+      metric == "mean_bird_gini" ~ gini_lower_ci,
+      metric == "mean_bird_pv" ~ pv_lower_ci
+    ),
+    upper_ci = case_when(
+      metric == "mean_bird_cv" ~ cv_upper_ci,
+      metric == "mean_bird_V2" ~ V2_upper_ci,
+      metric == "mean_bird_gini" ~ gini_upper_ci,
+      metric == "mean_bird_pv" ~ pv_upper_ci
+    )
+  )
+```
+
+```{r Visualize Variability in Eye Score}
+ggplot(long_summary_tes %>% filter(!metric %in% c("mean_bird_cv", "mean_bird_gamma_cv", "mean_bird_sd")), 
+       aes(x = dpi.f, y = value, shape = metric, color=metric)) +
+  geom_point(size = 3, position = position_dodge(width = .5)) +
+  geom_errorbar(
+    aes(ymin = lower_ci, ymax = upper_ci),
+    width = 0.2,
+    position = position_dodge(width = .5),
+    linetype = "dashed"
+  ) +
+  scale_shape_manual(
+    values = c("mean_bird_V2" = 22, "mean_bird_pv" = 16, "mean_bird_gini" = 23),
+    labels = c("V2", "PV", "Gini")  # Custom names for shapes
+  ) +
+  scale_color_manual(values=c("mean_bird_pv" = "black","mean_bird_V2" = "#5B5941", "mean_bird_gini" = "#FF9770"),
+                     labels = c("V2", "PV", "Gini"))+  # Custom names for shapes) +
+  labs(y = "Variability Metrics", x = "Days Post Infection", title = "Eye Score Variability Metrics by DPI and Treatment", color="Variability Metric", shape = "Variability Metric") +
+  theme_minimal() +
+  facet_wrap(~primary_treatment) +
+  theme_primary_facet_lh() +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.box = "vertical"  # Arrange legends in a vertical layout
+  ) 
+  # guides(
+  #   # Remove color legend
+  #   shape = guide_legend(ncol = 3)  # Arrange shape legend items in 3 columns
+  # )
+
+ggplot(p.aba %>% filter(inf_pri ==1), aes(x=dpi.f, y=tes.new, color=primary_treatment))+
+  geom_jitter(width=0.25, height=0, alpha=0.5)+
+  scale_color_manual(values=c(pri_colors[c(2,3)]))+
+  facet_wrap(~primary_treatment)+
+  labs(x= "Days Post Infection", y= "Eye Score", color="Primary Treatment")+
+    theme_primary_facet_lh() +
+   theme(
+    legend.position = "top",
+        plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.box = "vertical"  # Arrange legends in a vertical layout
+  ) +
+  guides(
+    color = guide_legend(title.position = "top", title.hjust = 0.5, ncol = 2),  # Primary Treatment legend on its own line
+    shape = guide_legend(title.position = "top", title.hjust = 0.5, ncol = 5)  # Center title and set columns
+  ) 
+```
+
+```{r Calculate Variability in pathogen load Primary}
+# Compute variability metrics for quantity1 and log10(quantity1)
+q.cv <- p.aba %>%
+  group_by(dpi.f, primary_treatment) %>%
+  drop_na(quantity1) %>%
+  filter(dpi.f %in% c(-8, 7, 41)) %>%
+  dplyr::reframe(
+    quantity1 = quantity1,
+    # log_quantity1 = log10(quantity1+1),
+    mean_quantity1 = mean(quantity1, na.rm = TRUE),
+    # mean_log_quantity1 = mean(log10(quantity1), na.rm = TRUE),
+    bird_sd = sd(quantity1, na.rm = TRUE),
+    bird_log_sd = sd(log10(quantity1), na.rm = TRUE),
+    band_number = band_number,
+    
+    # Calculating gamma CV, V2, Gini coefficient, and PV for original and log-transformed data
+    bird_gamma_cv = calculate_gamma_cv(quantity1),
+    bird_gamma_V2 = calculate_gamma_v2(quantity1),
+    bird_gini = calculate_gini(quantity1),
+    bird_pv = calculate_pv(quantity1),
+    
+    # bird_log_gamma_cv = calculate_gamma_cv(log10(quantity1)),
+    # bird_log_gamma_V2 = calculate_gamma_v2(log10(quantity1)),
+    # bird_log_gini = calculate_gini(log10(quantity1)),
+    # bird_log_pv = calculate_pv(log10(quantity1)),
+    
+    # Bootstrap for gamma CV, V2, Gini coefficient, and PV for original and log-transformed data
+    gamma_cv_bootstrap = list(replicate(n_boot, calculate_gamma_cv(sample(quantity1, replace = TRUE)))),
+    gamma_V2_bootstrap = list(replicate(n_boot, calculate_gamma_v2(sample(quantity1, replace = TRUE)))),
+    gini_bootstrap = list(replicate(n_boot, calculate_gini(sample(quantity1, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(quantity1, replace = TRUE))))
+    
+    # log_gamma_cv_bootstrap = list(replicate(n_boot, calculate_gamma_cv(sample(log10(quantity1), replace = TRUE)))),
+    # log_gamma_V2_bootstrap = list(replicate(n_boot, calculate_gamma_v2(sample(log10(quantity1), replace = TRUE)))),
+    # log_gini_bootstrap = list(replicate(n_boot, calculate_gini(sample(log10(quantity1), replace = TRUE)))),
+    # log_pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(log10(quantity1), replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals for original and log-transformed data
+  mutate(
+    gamma_cv_lower_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_V2_lower_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_V2_upper_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gini_lower_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gini_upper_ci = map_dbl(gini_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE))
+
+    # log_gamma_cv_lower_ci = map_dbl(log_gamma_cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    # log_gamma_cv_upper_ci = map_dbl(log_gamma_cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    # log_gamma_V2_lower_ci = map_dbl(log_gamma_V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    # log_gamma_V2_upper_ci = map_dbl(log_gamma_V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    # log_gini_lower_ci = map_dbl(log_gini_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    # log_gini_upper_ci = map_dbl(log_gini_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    # log_pv_lower_ci = map_dbl(log_pv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    # log_pv_upper_ci = map_dbl(log_pv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Optionally, remove bootstrap columns to clean up the dataset
+  select(-gamma_cv_bootstrap, -gamma_V2_bootstrap, -gini_bootstrap, -pv_bootstrap)%>%
+  
+  #select(-log_gamma_cv_bootstrap, -log_gamma_V2_bootstrap, -log_gini_bootstrap, -log_pv_bootstrap) %>%
+  ungroup()
+
+# Join results with the original data
+p.aba.q <- left_join(p.aba, q.cv, by = c("dpi.f", "primary_treatment", "band_number")) %>%
+  select(-quantity1.y) %>%
+  mutate(quantity1 = quantity1.x) %>%
+  select(-quantity1.x) %>%
+  filter(dpi.f %in% c(-8, 7, 41))
+
+# Summary table with mean statistics for both original and log-transformed metrics
+summary_tibble_q <- q.cv %>%
+  filter(dpi.f %in% c(-8, 7, 41))%>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    # Original metrics
+    mean_bird_gamma_cv = mean(bird_gamma_cv, na.rm = TRUE),
+    mean_bird_gamma_V2 = mean(bird_gamma_V2, na.rm = TRUE),
+    mean_bird_gini = mean(bird_gini, na.rm = TRUE),
+    mean_bird_sd = mean(bird_sd, na.rm = TRUE),
+    mean_bird_pv = mean(bird_pv, na.rm = TRUE),
+    avg_quantity1 = mean(quantity1, na.rm = TRUE),
+
+    # Log-transformed metrics
+    # mean_bird_log_gamma_cv = mean(bird_log_gamma_cv, na.rm = TRUE),
+    # mean_bird_log_gamma_V2 = mean(bird_log_gamma_V2, na.rm = TRUE),
+    # mean_bird_log_gini = mean(bird_log_gini, na.rm = TRUE),
+    # mean_bird_log_sd = mean(bird_log_sd, na.rm = TRUE),
+    # mean_bird_log_pv = mean(bird_log_pv, na.rm = TRUE),
+    # avg_log_quantity1 = mean(log_quantity1, na.rm = TRUE),
+
+    # Average confidence intervals for each metric (original and log-transformed)
+    gamma_cv_lower_ci = mean(gamma_cv_lower_ci, na.rm = TRUE),
+    gamma_cv_upper_ci = mean(gamma_cv_upper_ci, na.rm = TRUE),
+    gamma_V2_lower_ci = mean(gamma_V2_lower_ci, na.rm = TRUE),
+    gamma_V2_upper_ci = mean(gamma_V2_upper_ci, na.rm = TRUE),
+    gini_lower_ci = mean(gini_lower_ci, na.rm = TRUE),
+    gini_upper_ci = mean(gini_upper_ci, na.rm = TRUE),
+    pv_lower_ci = mean(pv_lower_ci, na.rm = TRUE),
+    pv_upper_ci = mean(pv_upper_ci, na.rm = TRUE),
+
+    # log_gamma_cv_lower_ci = mean(log_gamma_cv_lower_ci, na.rm = TRUE),
+    # log_gamma_cv_upper_ci = mean(log_gamma_cv_upper_ci, na.rm = TRUE),
+    # log_gamma_V2_lower_ci = mean(log_gamma_V2_lower_ci, na.rm = TRUE),
+    # log_gamma_V2_upper_ci = mean(log_gamma_V2_upper_ci, na.rm = TRUE),
+    # log_gini_lower_ci = mean(log_gini_lower_ci, na.rm = TRUE),
+    # log_gini_upper_ci = mean(log_gini_upper_ci, na.rm = TRUE),
+    # log_pv_lower_ci = mean(log_pv_lower_ci, na.rm = TRUE),
+    # log_pv_upper_ci = mean(log_pv_upper_ci, na.rm = TRUE),
+
+    # Number of individuals
+    n_individuals = n_distinct(band_number)
+  ) %>%
+  as_tibble()
+
+print(summary_tibble_q)
+
+# Step 2: Transform `summary_tibble_q` to long format and add CI columns
+long_summary_quant <- summary_tibble_q %>%
+  pivot_longer(
+    cols = starts_with("mean_bird") | starts_with("avg"), 
+    names_to = "metric", 
+    values_to = "value"
+  ) %>%
+  # Add corresponding lower and upper CI columns in long format
+  mutate(
+    lower_ci = case_when(
+      metric == "mean_bird_gamma_cv" ~ gamma_cv_lower_ci,
+      metric == "mean_bird_gamma_V2" ~ gamma_V2_lower_ci,
+      metric == "mean_bird_gini" ~ gini_lower_ci,
+      metric == "mean_bird_pv" ~ pv_lower_ci,
+      
+      # metric == "mean_bird_log_gamma_cv" ~ log_gamma_cv_lower_ci,
+      # metric == "mean_bird_log_gamma_V2" ~ log_gamma_V2_lower_ci,
+      # metric == "mean_bird_log_gini" ~ log_gini_lower_ci,
+      # metric == "mean_bird_log_pv" ~ log_pv_lower_ci
+    ),
+    upper_ci = case_when(
+      metric == "mean_bird_gamma_cv" ~ gamma_cv_upper_ci,
+      metric == "mean_bird_gamma_V2" ~ gamma_V2_upper_ci,
+      metric == "mean_bird_gini" ~ gini_upper_ci,
+      metric == "mean_bird_pv" ~ pv_upper_ci,
+      
+      # metric == "mean_bird_log_gamma_cv" ~ log_gamma_cv_upper_ci,
+      # metric == "mean_bird_log_gamma_V2" ~ log_gamma_V2_upper_ci,
+      # metric == "mean_bird_log_gini" ~ log_gini_upper_ci,
+      # metric == "mean_bird_log_pv" ~ log_pv_upper_ci
+    )
+  )
+
+print(long_summary_quant)
+
+```
+
+```{r Visualize Variability in Pathology}
+ggplot(long_summary_quant %>% filter(!metric %in% c("mean_bird_cv", "mean_bird_log_gamma_cv", "mean_bird_log_gamma_V2", "mean_bird_sd")), aes(x = dpi.f, y = value, color = metric, shape = metric)) +
+  geom_point(size = 3, position = position_dodge(width = 1.25)) +
+  geom_errorbar(
+    aes(ymin = lower_ci, ymax = upper_ci),  # No need to specify x or y again in aes
+    width = 0.2,
+    position = position_dodge(width = 1.25),
+    linetype = "dashed"
+  ) +
+ scale_color_manual(
+    values = c("mean_bird_pv" = "black", "mean_bird_gamma_cv" = "#94BFA7", "mean_bird_gamma_V2" = "#FF70A6", "mean_bird_gini" = "#FF9770"),
+  labels = c("Gamma CV", "Gamma V2", "Gini", "PV"))+ 
+  scale_shape_manual(
+     values = c("mean_bird_gamma_cv" = 21, "mean_bird_gamma_V2" = 22, "mean_bird_pv" = 16, "mean_bird_gini" = 23),
+    labels = c("Gamma CV", "Gamma V2", "Gini", "PV"))+  # Custom names for shapes
+  labs(y = "Variability Metrics", x = "Days Post Infection", title = "Path Load Variability Metrics by DPI and Treatment", shape = "Metric", color="Metric") +
+   scale_y_continuous(limits=c(0, 2))+
+  theme_minimal() +
+  facet_wrap(~primary_treatment)+
+  theme_primary_facet()+
+   theme(
+    legend.position = "top",
+        plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.box = "vertical"  # Arrange legends in a vertical layout
+  ) +
+  guides(
+    shape = guide_legend(title.position = "top", title.hjust = 0.5, ncol = 5)  # Center title and set columns
+  )
+
+ggplot(p.aba %>% filter(dpi.f %in% c(-8, 7, 41)), aes(x=dpi.f, y=quantity1, color=primary_treatment))+
+  geom_jitter(width=0.25, height=0, alpha=0.5)+
+  scale_color_manual(values=c(pri_colors))+
+  facet_wrap(~primary_treatment)+
+  labs(x= "Days Post Infection", y= "Pathogen Load", color="Primary Treatment")+
+    theme_primary_facet() +
+   theme(
+    legend.position = "top",
+        plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.box = "vertical"  # Arrange legends in a vertical layout
+  ) +
+  guides(
+    color = "none",  # Primary Treatment legend on its own line
+    #shape = guide_legend(title.position = "top", title.hjust = 0.5, ncol = 5)  # Center title and set columns
+  ) 
+```
+
+```{r Visualize Variability in Pathogen Load}
+ggplot() +
+  # Plotting mean gamma CV with error bars
+  geom_point(data = summary_tibble_q, aes(x = dpi.f, y = mean_bird_gamma_cv, color = primary_treatment, shape = "Gamma CV"), size = 3, position = position_dodge(width = 0.25)) +
+  geom_errorbar(data = q.cv, aes(x = dpi.f, y = bird_gamma_cv, ymin = gamma_cv_lower_ci, ymax = gamma_cv_upper_ci, color = primary_treatment), linetype = "dotted", position = position_dodge(width = 0.25), width = 0.2) +
+  
+  # Plotting mean gamma V2 with error bars
+  geom_point(data = summary_tibble_q, aes(x = dpi.f, y = mean_bird_gamma_V2, color = primary_treatment, shape = "Gamma V2"), size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = q.cv, aes(x = dpi.f, y = bird_gamma_V2, ymin = gamma_V2_lower_ci, ymax = gamma_V2_upper_ci, color = primary_treatment), position = position_dodge(width = 0.5), width = 0.2, linetype = "dashed") +
+  
+  # Plotting mean PV with error bars
+  geom_point(data = summary_tibble_q, aes(x = dpi.f, y = mean_bird_pv, color = primary_treatment, shape = "PV"), size = 3, position = position_dodge(width = 0.75)) +
+  geom_errorbar(data = q.cv, aes(x = dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, color = primary_treatment), linetype = "solid", width = 0.2, alpha = 0.05, position = position_dodge(width = 0.75)) +
+
+  # Plotting mean Gini coefficient with error bars
+  geom_point(data = summary_tibble_q, aes(x = dpi.f, y = mean_bird_gini, color = primary_treatment, shape = "Gamma Gini Coefficient"), size = 3, position = position_dodge(width = 1)) +
+  geom_errorbar(data = q.cv, aes(x = dpi.f, ymin = gini_lower_ci, ymax = gini_upper_ci, color = primary_treatment), linetype = "dashed", position = position_dodge(width = 1), width = 0.2) +
+
+  # Custom colors
+  scale_color_manual(values = pri_colors) +
+  
+  # Define shapes for each metric in the legend
+  scale_shape_manual(values = c("Gamma CV" = 21, "Gamma V2" = 22, "PV" = 16, "Gamma Gini Coefficient" = 23)) +
+  
+  # Labels
+  labs(y = "Variability Metrics (Gamma CV, Gamma V2, PV, Gamma Gini)", x = "DPI", title = "Pathogen Load Variability Metrics by DPI and Treatment Primary Infection", shape = "Metric") +
+  
+  # Legends and themes
+  theme_minimal()
+
+ggplot(q.cv)+
+  geom_jitter(aes(x=dpi.f, y=quantity1, color=primary_treatment), height=0, width=0.25, alpha=0.5)+
+  geom_hline(yintercept = 50, alpha=0.25)+
+  scale_color_manual(values=c(pri_colors))+
+  scale_y_log10()
+```
+
+#####Secondary Infection
+
+```{r Remove Birds That Did Not Resolve Infection By DPI 42}
+#omit from dataset - were still infected (path load) on day 41 prior to reinfection day 42
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2469, 2520, 2494)))
+
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )%>%
+  modify_header(
+    label ~ "**FINAL SAMPLE SIZES SECONDARY**"
+  )
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=primary_treatment
+  )
+```
+
+####Variability in Reinfected Birds####
+```{r Secondary Sample Sizes}
+sec.ab <- m.ab %>%
+  filter(inf_sec == 1 & dpi > 41 & secondary_dose == 7000)
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(inf_sec, primary_treatment, secondary_dose, band_number) %>%
+  group_by(inf_sec, secondary_dose, primary_treatment) %>%
+  tbl_summary(
+    by = inf_sec, # Grouping by infected secondary
+    statistic = list(band_number ~ "{n} ({p}%)") # Count occurrences and show percentages
+  ) %>%
+  modify_header(label ~ "**Infected Secondary**") 
+
+sec.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+```
+
+```{r Max quantity and eye score secondary}
+max.quant.sec <- sec.ab %>%
+  filter(dpi > 41 & inf_sec ==1) %>%
+  group_by(band_number, primary_treatment, secondary_dose) %>%
+  reframe(max_quantity = max(quantity1, na.rm = TRUE))
+
+max.tes.sec <- sec.ab %>%
+  group_by(band_number, primary_treatment, secondary_dose)%>%
+  reframe(max_tes = max(tes, na.rm=TRUE))
+
+max.sec<-left_join(max.quant.sec, max.tes.sec, by="band_number")
+
+max.sec$primary_treatment <- max.sec$primary_treatment.x
+max.sec$secondary_dose <- max.sec$secondary_dose.x
+
+max.sec <- max.sec %>%
+  dplyr::select(-c(primary_treatment.y, secondary_dose.y, primary_treatment.x, secondary_dose.x))
+#max.sec$max_quantity1 <- max.sec$max_quantity+1
+
+```
+
+```{r}
+sec.var <- max.sec %>%
+  group_by(primary_treatment) %>%
+  dplyr::reframe(
+    # For max_quantity
+    max_quantity = max_quantity,
+    mean_quantity = mean(max_quantity),
+    median_quantity = median(max_quantity),
+    bird_sd_quantity = sd(max_quantity),
+    band_number = band_number,
+    
+    bird_cv_quantity = calculate_cv(max_quantity),                # Calculate CV for max_quantity
+    bird_pv_quantity = calculate_pv(max_quantity),                # Calculate PV for max_quantity
+    bird_v2_quantity = calculate_v2(max_quantity),                # Calculate V2 for max_quantity
+    bird_gini_quantity = calculate_gini(max_quantity),            # Calculate Gini for max_quantity
+    bird_gamma_cv_quantity = calculate_gamma_cv(max_quantity),    # Gamma CV for max_quantity
+    bird_gamma_v2_quantity = calculate_gamma_v2(max_quantity),    # Gamma V2 for max_quantity
+    
+    # Bootstrap for each metric for max_quantity
+    cv_bootstrap_quantity = list(replicate(n_boot, calculate_cv(sample(max_quantity, replace = TRUE)))),
+    pv_bootstrap_quantity = list(replicate(n_boot, calculate_pv(sample(max_quantity, replace = TRUE)))),
+    v2_bootstrap_quantity = list(replicate(n_boot, calculate_v2(sample(max_quantity, replace = TRUE)))),
+    gini_bootstrap_quantity = list(replicate(n_boot, calculate_gini(sample(max_quantity, replace = TRUE)))),
+    gamma_cv_bootstrap_quantity = list(replicate(n_boot, calculate_gamma_cv(sample(max_quantity, replace = TRUE)))),
+    gamma_v2_bootstrap_quantity = list(replicate(n_boot, calculate_gamma_v2(sample(max_quantity, replace = TRUE)))),
+    
+    # For max_tes
+    max_tes = max_tes,
+    mean_tes = mean(max_tes),
+    median_tes = median(max_tes),
+    bird_sd_tes = sd(max_tes),
+    
+    bird_cv_tes = calculate_cv(max_tes),                          # Calculate CV for max_tes
+    bird_pv_tes = calculate_pv(max_tes),                          # Calculate PV for max_tes
+    bird_v2_tes = calculate_v2(max_tes),                          # Calculate V2 for max_tes
+    bird_gini_tes = calculate_gini(max_tes),                      # Calculate Gini for max_tes
+    bird_gamma_cv_tes = calculate_gamma_cv(max_tes),              # Gamma CV for max_tes
+    bird_gamma_v2_tes = calculate_gamma_v2(max_tes),              # Gamma V2 for max_tes
+    
+    # Bootstrap for each metric for max_tes
+    cv_bootstrap_tes = list(replicate(n_boot, calculate_cv(sample(max_tes, replace = TRUE)))),
+    pv_bootstrap_tes = list(replicate(n_boot, calculate_pv(sample(max_tes, replace = TRUE)))),
+    v2_bootstrap_tes = list(replicate(n_boot, calculate_v2(sample(max_tes, replace = TRUE)))),
+    gini_bootstrap_tes = list(replicate(n_boot, calculate_gini(sample(max_tes, replace = TRUE)))),
+    gamma_cv_bootstrap_tes = list(replicate(n_boot, calculate_gamma_cv(sample(max_tes, replace = TRUE)))),
+    gamma_v2_bootstrap_tes = list(replicate(n_boot, calculate_gamma_v2(sample(max_tes, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals for CV, PV, V2, Gini, and Gamma-distributed metrics
+  mutate(
+    # For max_quantity
+    cv_lower_ci_quantity = map_dbl(cv_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci_quantity = map_dbl(cv_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci_quantity = map_dbl(pv_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci_quantity = map_dbl(pv_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci_quantity = map_dbl(v2_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci_quantity = map_dbl(v2_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gini_lower_ci_quantity = map_dbl(gini_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gini_upper_ci_quantity = map_dbl(gini_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_cv_lower_ci_quantity = map_dbl(gamma_cv_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci_quantity = map_dbl(gamma_cv_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_v2_lower_ci_quantity = map_dbl(gamma_v2_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_v2_upper_ci_quantity = map_dbl(gamma_v2_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    
+    # For max_tes
+    cv_lower_ci_tes = map_dbl(cv_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci_tes = map_dbl(cv_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci_tes = map_dbl(pv_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci_tes = map_dbl(pv_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci_tes = map_dbl(v2_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci_tes = map_dbl(v2_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gini_lower_ci_tes = map_dbl(gini_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gini_upper_ci_tes = map_dbl(gini_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_cv_lower_ci_tes = map_dbl(gamma_cv_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci_tes = map_dbl(gamma_cv_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_v2_lower_ci_tes = map_dbl(gamma_v2_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_v2_upper_ci_tes = map_dbl(gamma_v2_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Optionally, remove the bootstrap columns to clean up the dataset
+  select(-cv_bootstrap_quantity, -pv_bootstrap_quantity, -v2_bootstrap_quantity, -gini_bootstrap_quantity,
+         -gamma_cv_bootstrap_quantity, -gamma_v2_bootstrap_quantity,
+         -cv_bootstrap_tes, -pv_bootstrap_tes, -v2_bootstrap_tes, -gini_bootstrap_tes,
+         -gamma_cv_bootstrap_tes, -gamma_v2_bootstrap_tes) %>%
+  ungroup()
+
+# Merge back with the original dataset and cleanup
+max.sec.v <- left_join(max.sec, sec.var, by = c("primary_treatment", "band_number"))
+
+# Summarize and print the final table
+summary_tibble <- sec.var %>%
+  group_by(primary_treatment) %>%
+  summarize(
+    mean_bird_cv_quantity = mean(bird_cv_quantity, na.rm = TRUE),          # Mean CV for max_quantity
+    mean_bird_sd_quantity = mean(bird_sd_quantity, na.rm = TRUE),          # Mean SD for max_quantity
+    mean_bird_pv_quantity = mean(bird_pv_quantity, na.rm = TRUE),          # Mean PV for max_quantity
+    mean_bird_v2_quantity = mean(bird_v2_quantity, na.rm = TRUE),          # Mean V2 for max_quantity
+    mean_bird_gini_quantity = mean(bird_gini_quantity, na.rm = TRUE),      # Mean Gini for max_quantity
+    mean_bird_gamma_cv_quantity = mean(bird_gamma_cv_quantity, na.rm = TRUE), # Mean Gamma CV for max_quantity
+    mean_bird_gamma_v2_quantity = mean(bird_gamma_v2_quantity, na.rm = TRUE), # Mean Gamma V2 for max_quantity
+    
+    mean_bird_cv_tes = mean(bird_cv_tes, na.rm = TRUE),                    # Mean CV for max_tes
+    mean_bird_sd_tes = mean(bird_sd_tes, na.rm = TRUE),                    # Mean SD for max_tes
+    mean_bird_pv_tes = mean(bird_pv_tes, na.rm = TRUE),                    # Mean PV for max_tes
+    mean_bird_v2_tes = mean(bird_v2_tes, na.rm = TRUE),                    # Mean V2 for max_tes
+    mean_bird_gini_tes = mean(bird_gini_tes, na.rm = TRUE),                # Mean Gini for max_tes
+    mean_bird_gamma_cv_tes = mean(bird_gamma_cv_tes, na.rm = TRUE),        # Mean Gamma CV for max_tes
+    mean_bird_gamma_v2_tes = mean(bird_gamma_v2_tes, na.rm = TRUE),        # Mean Gamma V2 for max_tes
+    
+    avg_max_quantity = mean(max_quantity, na.rm = TRUE),                   # Average max_quantity for each group
+    median_max_quantity = median(max_quantity, na.rm=TRUE),
+    avg_max_tes = mean(max_tes, na.rm = TRUE),                             # Average max_tes for each group
+    median_max_tes = median(max_tes, na.rm=TRUE),
+    n_individuals = n_distinct(band_number)                                # Number of individuals in each group
+  ) %>%
+  as_tibble()
+
+# Print the summary table
+print(summary_tibble)
+```
+
+```{r Graph Secondary Path Load Variability}
+ggplot(max.sec.v) +
+  # CV points and error bars
+  geom_point(aes(x = "CV", y = bird_cv_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(x = "CV", ymin = cv_lower_ci_quantity, ymax = cv_upper_ci_quantity, color = primary_treatment), width = 0, position = position_dodge(width = 0.5)) +
+  
+  # PV points and error bars
+  geom_point(aes(x = "PV", y = bird_pv_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(x = "PV", ymin = pv_lower_ci_quantity, ymax = pv_upper_ci_quantity, color = primary_treatment), width = 0, position = position_dodge(width = 0.5)) +
+  
+  # V2 points and error bars
+  geom_point(aes(x = "V2", y = bird_v2_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(x = "V2", ymin = v2_lower_ci_quantity, ymax = v2_upper_ci_quantity, color = primary_treatment), width = 0, position = position_dodge(width = 0.5)) +
+  
+  # Gini points and error bars
+  geom_point(aes(x = "Gini", y = bird_gini_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(x = "Gini", ymin = gini_lower_ci_quantity, ymax = gini_upper_ci_quantity, color = primary_treatment), width = 0, position = position_dodge(width = 0.5)) +
+  
+  # Custom colors and shapes
+  scale_color_manual(values = pri_colors) +
+  scale_shape_manual(
+    name = "Variability Metric",
+    values = c("CV" = 17, "PV" = 19, "V2" = 18, "Gini" = 15),  # Assign shapes
+    labels = c("CV" = "CV", "PV" = "PV", "V2" = "V2", "Gini" = "Gini")
+  ) +
+  
+  # Labels and title
+  labs(
+    title = "Secondary Pathogen Load Variability",
+    y = "Variability",
+    x = "Metric",
+    color = "Primary Treatment"
+  ) +
+  
+  theme_minimal()
+
+ggplot(max.sec.v)+
+    #raw data
+  geom_jitter(aes(x=primary_treatment, y=max_quantity1, color=primary_treatment), width=0.1, alpha=0.5)+
+  scale_color_manual(values = pri_colors) +
+   # Labels and title
+  labs(
+    title = "Secondary Pathogen Load",
+    y = "Pathogen Load",
+    x = "Primary Treatment",
+    color = "Primary Treatment"
+  ) +
+  
+  theme_minimal()
+
+
+dodge_width <- 0.4
+
+# Variability Metrics Plot for max_quantity
+ggplot() +
+  # Plotting CV with error bars
+  geom_point(data = max.sec.v, aes(x = "Gamma CV", y = bird_gamma_cv_quantity, color = "CV"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "Gamma CV", ymin = gamma_cv_lower_ci_quantity, ymax = gamma_cv_upper_ci_quantity, color = "CV"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting PV with error bars
+  geom_point(data = max.sec.v, aes(x = "PV", y = bird_pv_quantity, color = "PV"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "PV", ymin = pv_lower_ci_quantity, ymax = pv_upper_ci_quantity, color = "PV"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting V2 with error bars
+  geom_point(data = max.sec.v, aes(x = "Gamma V2", y = bird_gamma_v2_quantity, color = "V2"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "Gamma V2", ymin = gamma_v2_lower_ci_quantity, ymax = gamma_v2_upper_ci_quantity, color = "V2"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting Gini Coefficient with error bars
+  geom_point(data = max.sec.v, aes(x = "Gini", y = bird_gini_quantity, color = "Gini"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "Gini", ymin = gini_lower_ci_quantity, ymax =gini_upper_ci_quantity, color = "Gini"), width = 0.0, position = position_dodge(width = dodge_width)) +
+    # Custom colors
+  scale_color_manual(values = c("Gamma CV" = "#94BFA7", "PV" = "black", "Gamma V2" = "#FF70A6", "Gini" = "#FF9770")) +
+  
+  labs(x="Primary Treatment", y="Variability Metric", color="Variability Metric", title = "Secondary Pathogen Load Variability (max_quantity)")+
+ theme_primary_facet()
+
+# Raw Data Plot for max_quantity
+ggplot(max.sec.v) +
+  # Jittered raw data points
+  geom_jitter(aes(x = primary_treatment, y = max_quantity.x, color = primary_treatment), width = 0.1, alpha = 0.75, size=2, shape = 16) +
+    stat_summary(aes(groups=primary_treatment, x=primary_treatment, y=max_quantity.x), geom="point", fun=median, shape = "-", size=7)+
+  scale_color_manual(values =pri_colors) +
+  
+  # Labels and title
+  labs(
+    title = "Secondary Pathogen Load (max_quantity)",
+    y = "Pathogen Load",
+    x = "Primary Treatment",
+    color = "Primary Treatment"
+  ) +
+   theme_primary_facet()
+```
+
+```{r Graph Secondary Variability in Pathology}
+
+
+dodge_width <- 0.4
+
+ggplot() +
+  # Plotting CV with error bars
+  geom_point(data = max.sec.v, aes(x = "CV", y = bird_cv_tes, color = "CV"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "CV", ymin = cv_lower_ci_tes, ymax = cv_upper_ci_tes, color = "CV"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting PV with error bars
+  geom_point(data = max.sec.v, aes(x = "PV", y = bird_pv_tes, color = "PV"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "PV", ymin = pv_lower_ci_tes, ymax = pv_upper_ci_tes, color = "PV"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting V2 with error bars
+  geom_point(data = max.sec.v, aes(x = "V2", y = bird_v2_tes, color = "V2"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "V2", ymin = v2_lower_ci_tes, ymax = v2_upper_ci_tes, color = "V2"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Plotting Gini Coefficient with error bars
+  geom_point(data = max.sec.v, aes(x = "Gini", y = bird_gini_tes, color = "Gini"), shape = 16, size = 3, position = position_dodge(width = dodge_width)) +
+  geom_errorbar(data = max.sec.v, aes(x = "Gini", ymin = gini_lower_ci_tes, ymax = gini_upper_ci_tes, color = "Gini"), width = 0.0, position = position_dodge(width = dodge_width)) +
+  
+  # Custom colors
+  scale_color_manual(values = c("CV" = "#94BFA7", "PV" = "black", "V2" = "#FF70A6", "Gini" = "#FF9770")) +
+  
+  # Labels
+  labs(
+    title = "Secondary Pathology Variability (max_tes) by Primary Treatment",
+    y = "Variability",
+    x = "Variability Metric",
+    color = "Metric"
+  ) +
+ theme_primary_facet()
+
+# tech Data Plot for max_tes
+ggplot(max.sec.v) +
+  # Jittered raw data points
+  geom_jitter(aes(x = primary_treatment, y = max_tes.x, color = primary_treatment), width = 0.1, height=0, alpha = 0.75, size=2, shape = 16) +
+  stat_summary(aes(groups=primary_treatment, x=primary_treatment, y=max_tes.x), geom="point", fun=median, shape = "-", size=7)+
+  scale_color_manual(values =pri_colors) +
+  
+  # Labels and title
+  labs(
+    title = "Secondary Pathology (max_tes)",
+    y = "Pathogen Load",
+    x = "Primary Treatment",
+    color = "Primary Treatment"
+  ) +
+  theme_primary_facet()
+```
+

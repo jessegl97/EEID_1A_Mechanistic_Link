@@ -1,0 +1,1608 @@
+---
+title: "Host Response"
+author: "Jesse Garrett-Larsen"
+date: "2024-10-15"
+output: html_document
+---
+EEID 1a Heterogenetiy in Antibodies + Disease Response
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load Packages}
+rm(list=ls())
+library(tidyverse)
+library(dplyr)
+library(glmmTMB)
+library(effects)
+library(AICcmodavg)
+library(emmeans)
+library(MASS)
+library(DHARMa)
+library(lme4)
+library(purrr)
+#install.packages("remotes")
+#remotes::install_github("T-Engel/CValternatives")
+library(CValternatives)
+library(patchwork)
+library(gridExtra)
+library(car)
+```
+
+```{r Import Data}
+source("dataCleaning_EEID1A.R")
+```
+
+```{r Format Theme}
+#set colors for primary treatment
+pri_colors <- c("#1B9E77", "#7570B3", "#D95F02")
+#set color scheme secondary treatment
+sec_colors <- c("#8C754B", "#77AB59", "#59A5D8", "#9F77D9", "#FA8072")
+#set theme
+theme_set(theme_minimal())
+```
+
+```{r Raw Data Sample Sizes}
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )%>%
+  modify_header(
+    label ~ "**All Birds Before Removal**"
+  )
+```
+
+####Generate Infection Data + Format For Analysis
+Rules: A bird is considered infected if it had an eye score > 0.5 for more than one day, a pathogen load > 50 copies, or both
+```{r Threshold Cutoffs}
+m.ab$threshold_cutoff = 50
+m.ab$seropos_cutoff = 0.061
+m.ab$pathology_cutoff = 0
+```
+
+inf = if quantity (where any NA is replaced with 0) is greater than cutoff of 50 copies OR total eye score (where any NAs are ignored) is greater than 0.5 for more than one consecutive sampling day, or total eye score is greater or equal to 1 for at least one day, return 1, else return 0
+```{r Generate Infection Data}
+m.ab <- m.ab %>%
+  # Sort data by band_number and dpi
+  arrange(band_number, dpi) %>%
+  # Replace NA values for quantity only
+  mutate(quantity_clean = coalesce(quantity, 0)) %>%
+  # Flag as infected if quantity > 50 on any single day
+  mutate(quantity_flag = ifelse(quantity_clean > 50, 1, 0)) %>%
+  # Check consecutive days for tes > 0.5, ignoring NAs for tes
+  group_by(band_number) %>%
+  mutate(
+    tes_flag = ifelse(tes > 0.5 & !is.na(tes), 1, 0),
+    tes_consecutive = tes_flag + lag(tes_flag, default = 0),
+    tes_single_high = ifelse(tes >= 1 & !is.na(tes), 1, 0)
+  ) %>%
+  # Combine the three criteria: quantity > 50 OR tes > 0.5 on consecutive days OR tes >= 1 on any day
+  mutate(inf = ifelse(quantity_flag == 1 | tes_consecutive > 1 | tes_single_high == 1, 1, 0)) %>%
+  # Calculate inf_pri and inf_sec based on dpi
+  ungroup() %>%
+  group_by(band_number) %>%
+  mutate(
+    inf_pri = ifelse(any(inf == 1 & dpi < 42), 1, 0),
+    inf_sec = ifelse(any(inf == 1 & dpi > 42), 1, 0)
+  ) %>%
+  # Un-group the data if needed
+  ungroup() %>%
+  # Select relevant columns (optional)
+  select(-quantity_clean, -quantity_flag, -tes_flag, -tes_consecutive, -tes_single_high)
+
+
+ggplot(m.ab, aes(x=dpi, y=tes, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_line(aes(groups=band_number))+
+  geom_hline(yintercept=log10(50))+
+facet_wrap(~inf)
+
+ggplot(m.ab, aes(x=dpi, y=tes, color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_line(aes(groups=band_number))+
+  geom_hline(yintercept=log10(50))+
+facet_wrap(~inf_pri)
+
+ggplot(m.ab, aes(x=dpi, y=log10(quantity1), color=fct_rev(primary_treatment)))+
+  geom_point()+
+  geom_line(aes(groups=band_number))+
+  geom_hline(yintercept=log10(50))+
+facet_wrap(~inf_sec)
+
+```
+
+```{r Omit Birds n=10}
+prob_birds <- m.ab %>% filter(band_number %in% c(2274, 2514, 2469, 2520, 2494, 2452, 2562, 2419, 2434, 2505))%>%
+  select(band_number, dpi, primary_treatment, secondary_dose, quantity, tes, l_eye_score, r_eye_score, elisa_od)
+
+prob_birds %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(by=dpi)%>%
+  modify_header(
+    label ~ "**Birds to Remove**"
+  )
+
+#omit 2505 from data set for analysis as it was positive at quarantine (n=1)
+m.ab <- m.ab %>%
+  filter(band_number != 2505)
+
+#omit 2452 and 2562 bc positive qpcr and they are shams (n=2)
+m.ab <- m.ab %>% filter(!band_number %in% c(2452, 2562)) 
+
+#omit sham birds with eye scores (0.5) (2419, 2434) (n=2)
+m.ab <- m.ab %>% filter(!band_number %in% c(2419, 2434))
+
+#omit sham bird with path load (2514) (n=1)
+m.ab <- m.ab %>% filter(band_number != 2514)
+
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  ) %>%
+  modify_header(
+    label ~ "**Sample Sizes for Primary Analysis**"
+  )
+#Final Primary Sample Sizes: Sham = 46; Low = 51; High = 53
+```
+```{r Idenity Birds to Remove For Secondary}
+##Some birds did not fully recover after primary infection. These birds were included in primary analysis, but will be excluded from secondary analysis. I have identified these birds below, but *will not remove them until secondary analysis*.
+
+#check birds that were not recovered by secondary infection: 2274, 2469, 2520, 2494 (2514 not recovered but omitted above)
+not_recovered <- m.ab %>% 
+  filter(band_number %in% c(2274, 2469, 2520, 2494))%>%
+  dplyr::select(band_number, dpi, primary_treatment, secondary_dose, quantity, tes)
+
+not_recovered %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )%>%
+  modify_header(
+    label ~ "**Birds Not Recovered DPI 41**"
+  )
+
+#confirm quantity > cutoff at dpi 41
+ggplot(not_recovered, aes(x=dpi, y=quantity, color=primary_treatment))+
+  geom_point()+
+  geom_path()+
+  geom_hline(yintercept = 50, alpha=0.5)+
+  geom_vline(xintercept = 41, alpha=0.5, lty = "dashed")+
+  facet_wrap(~band_number)+
+  ylim(min=0, max=700)
+```
+
+####Primary Challenge
+```{r Final Primary Sample Size}
+m.ab %>%
+  dplyr::select(dpi, primary_treatment)%>%
+  tbl_summary(
+    by=dpi
+  ) %>%
+  modify_header(
+    label ~ "**PRIMARY ANALYSIS FINAL SAMPLE SIZES**"
+  )
+```
+```{r p.ab Data Frame With Only Primary Infection}
+#data frame with only primary infection
+p.ab <- m.ab %>%
+  filter(dpi <=41)
+```
+
+```{r Do baseline antibody levels differ between treatment groups?}
+#Baseline antibody levels did not differ
+lm0 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi <0), family=Gamma())
+summary(lm0)
+plot(allEffects(lm0))
+simulateResiduals(lm0, plot=T)
+
+emm_r <- emmeans(lm0, ~primary_treatment)
+pairs(emm_r)
+```
+```{r Neither mass nor sex predict antibody response}
+p.ab$mass <- as.numeric(p.ab$mass)
+max.ab <- p.ab %>%
+  group_by(band_number, primary_treatment) %>%
+  reframe(max_od = max(elisa_od, na.rm = TRUE),
+            mass = as.numeric(mass[dpi == -8]),
+            dpi = dpi,
+            sex = sex,
+            inf_pri = inf_pri)
+
+#Neither Mass nor Sex predict max antibody response
+lmm <- glm(max_od ~ mass + primary_treatment + sex, data=max.ab %>%filter(dpi == -8), family=Gamma())
+summary(lmm)
+plot(allEffects(lmm))
+simulateResiduals(lmm, plot=T)
+
+ggplot(max.ab%>%filter(dpi == -8), aes(x=mass, y=max_od, color=primary_treatment))+
+  geom_boxplot(aes(x=mass, y=0.1), width=0.01, color="black")+
+  geom_point()+
+  geom_smooth(method = "glm", method.args = list(family="Gamma"))+
+  facet_wrap(~sex~primary_treatment, nrow=2)
+
+#Neither Mass nor Sex predict infection status
+lmi <- glm(inf_pri ~ mass + primary_treatment + sex, data=max.ab %>%filter(dpi == -8), family=binomial())
+summary(lmi)
+simulateResiduals(lmi, plot=T)
+
+```
+
+####Antibody Levels Across Primary Treatment
+```{r Antibody Dataframe}
+#I treat days post inoculation as a factor in these models and use band_number as a random effect
+p.abt <- p.ab %>%
+  filter(dpi %in% c(-8, 14, 41))
+p.abt$dpi.f <- as.factor(p.abt$dpi)
+```
+
+```{r Do antibody levels vary across dpi? Does sex influence antibody response?}
+#model comparison 
+p1 <- glmmTMB(elisa_od~primary_treatment + dpi.f + (1|band_number), data=p.abt, family=Gamma(log))
+p2 <- glmmTMB(elisa_od~primary_treatment*dpi.f + (1|band_number), data=p.abt, family=Gamma(log))
+p2.5 <- glmmTMB(elisa_od~primary_treatment*dpi.f + sex + (1|band_number), data=p.abt, family=Gamma(log))
+p3<- glmmTMB(elisa_od~primary_treatment + sex + dpi.f + (1|band_number), data=p.abt, family=Gamma(log))
+p4<- glmmTMB(elisa_od~primary_treatment * sex + dpi.f + (1|band_number), data=p.abt, family=Gamma(log))
+p5 <- glmmTMB(elisa_od~1 + dpi.f + (1|band_number), data=p.abt, family=Gamma(log))
+
+aictab(cand.set=list(p1, p2, p2.5, p3, p4, p5), modnames=c("p1", "p2", "p2.5", "p3", "p4", "p5"))
+# Interaction between primary_treatment and dpi.f without sex is best model by AICc
+
+#model comparison VGAM
+library(VGAM)
+drop1(p1, test="Chisq") #primary_treatment and dpi.f contribute uniquely to explaining variation
+
+drop1(p2, test="Chisq") #The interaction between primary_treatment and dpi.f > the effect of primary treatment on the outocme varies significantly by dpi levels
+
+drop1(p2.5, test="Chisq") # sex is not significant
+
+drop1(p3, test="Chisq") # sex is not significant but interaction b/t primary_treatment and dpi.f is better
+
+drop1(p4, test="Chisq") # primary_treatment*sex is not significant
+
+drop1(p5, test="Chisq") # better with primary_treatment
+```
+```{r Primary Treatment Antibody Final Model}
+#make Sham the reference category
+p.abt$primary_treatment <- relevel(p.abt$primary_treatment, ref = "Sham")
+#final model
+library(lme4)
+lm1 <- glmmTMB(elisa_od~ primary_treatment*dpi.f + (1|band_number), data=p.abt, family=Gamma(log)) 
+
+#fully interactive does not converge with inverse link- only log link
+summary(lm1)
+car::Anova(lm1, type = "III")
+simulateResiduals(lm1, plot=T) #but residuals look terrible with log link
+hist(resid(lm1))
+simulation_output <- simulateResiduals(fittedModel = lm1, n = 1000)
+
+# Plot residuals
+plotSimulatedResiduals(simulation_output, rank = TRUE)
+#dispersion test
+testDispersion(simulation_output)
+
+p.abt$elisa_od_log <- log(p.abt$elisa_od)
+hist(p.abt$elisa_od_log)
+lm1log <- lmer(elisa_od_log ~ primary_treatment * dpi.f + (1|band_number), data=p.abt)
+summary(lm1log)
+
+emm_results <- emmeans(lm1, ~ primary_treatment|dpi.f, scale="response")
+pairwise <- pairs(emm_results, adjust="tukey")
+(summary(pairwise))
+pairwise_df <- as.data.frame(pairwise)
+
+ggplot(pairwise_df, aes(x = contrast, y = estimate, shape=dpi.f)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = estimate - SE, ymax = estimate + SE), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Pairwise Comparisons of Primary Treatments within Each dpi.f",
+       x = "Comparison",
+       y = "Estimated Difference") +
+    coord_flip() +  # Flip the coordinates for better readability
+  theme_minimal()
+```
+
+```{r Model Predictions lm1}
+#specify model to predict
+mod.pred <- lm1
+#Model predictions
+dat.new=expand.grid(primary_treatment=unique(p.abt$primary_treatment),
+                    elisa_od = unique(p.abt$elisa_od),
+                    dpi.f = unique(p.abt$dpi.f))
+#generate yhat values
+dat.new$yhat = predict(mod.pred, type="response", newdata=dat.new, re.form=NA)
+#generate SEM
+preds = predict(mod.pred, type="link", newdata=dat.new, se.fit=TRUE, re.form=NA)
+dat.new = cbind(dat.new, preds)
+
+ilink <- family(mod.pred)$linkinv
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+head(dat.new)
+```
+
+```{r Format data for Variability in Antibodies for individuals who were infected}
+head(p.ab)
+#add small constant to total eye score for calculation of variability
+p.ab$tes.new <- p.ab$tes + .01
+#new df with only individuals that were infected any time during primary challenge
+p.ab$dpi.f <- as.factor(p.ab$dpi)
+p.abi <- p.ab %>%
+  filter(inf_pri == 1)%>%
+  dplyr::select(dpi.f, dpi, primary_treatment, tes.new, elisa_od, quantity1, sex, band_number, inf_pri)
+
+#df with all individuals during primary challenge
+p.aba <-  p.ab %>%
+  dplyr::select(dpi.f, dpi, primary_treatment, tes.new, elisa_od, quantity1, sex, band_number, inf_pri)
+```
+
+
+```{r Calculate Variability in Antibodies for individuals who were infected}
+# Define functions for calculating CV, PV, and V2
+calculate_cv <- function(data) {
+  return(sd(data) / mean(data))
+}
+
+calculate_pv <- function(data) {
+  return(PV(data))
+}
+
+calculate_v2 <- function(data) {
+  mean_x <- mean(data)
+  sd_x <- sd(data)
+  v2 <- sd_x^2 / (sd_x^2 + mean_x^2)
+  return(v2)
+}
+
+# Set the number of bootstrap replicates
+n_boot <- 1000
+
+# Pipeline to calculate CV, PV, V2, and their 95% confidence intervals
+a.cv <- p.aba %>%
+  group_by(dpi.f, primary_treatment) %>%
+  drop_na(elisa_od) %>%
+  dplyr::reframe(
+    # Calculate means and standard deviations
+    elisa_od = elisa_od,
+    mean_od = mean(elisa_od),
+    bird_sd = sd(elisa_od),
+    band_number = band_number,
+    bird_cv = calculate_cv(elisa_od),   # Calculate CV for the original data
+    bird_pv = calculate_pv(elisa_od),   # Calculate PV for the original data
+    bird_v2 = calculate_v2(elisa_od),   # Calculate V2 for the original data
+    
+    # Bootstrap for each metric
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(elisa_od, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(elisa_od, replace = TRUE)))),
+    v2_bootstrap = list(replicate(n_boot, calculate_v2(sample(elisa_od, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals for CV, PV, and V2
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975)),
+    
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975)),
+    
+    v2_lower_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.025)),
+    v2_upper_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.975))
+  ) %>%
+  # Optionally, remove the bootstrap columns to clean up the dataset
+  select(-cv_bootstrap, -pv_bootstrap, -v2_bootstrap) %>%
+  ungroup()
+
+#add to df and format names
+p.aba.m <- left_join(p.aba, a.cv, by=c("dpi.f", "primary_treatment", "band_number"))
+ p.aba.m <- p.aba.m %>%
+   select(-elisa_od.y)
+ p.aba.m$elisa_od <- p.aba.m$elisa_od.x
+# p.abi.m$primary_treatment <- p.abi.m$primary_treatment.x
+# p.abi.m <- p.abi.m %>%
+#   select(-elisa_od.x, -primary_treatment.x)
+
+#just days samples were taken
+p.aba.m <- p.aba.m %>%
+  filter(dpi.f %in% c(-8, 14, 41))
+
+summary_tibble <- a.cv %>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    mean_bird_cv = mean(bird_cv, na.rm = TRUE),    # Calculate the mean of bird_cv for each group
+    mean_bird_sd = mean(bird_sd, na.rm = TRUE),    # Calculate the mean of bird_sd for each group
+    mean_bird_pv = mean(bird_pv, na.rm = TRUE),    # Calculate the mean of bird_pv for each group
+    avg_elisa_od = mean(elisa_od, na.rm = TRUE),# Calculate the average elisa_od for each group
+    n_individuals = n_distinct(band_number) #calculate number of individuals in each group
+  ) %>%
+  as_tibble()
+print(summary_tibble)
+```
+```{r Antibodies and Variability Figure 2}
+#overlay PV and elisa_od
+#FIGURE 2
+ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_treatment)) +
+  # Original jittered data points for elisa_od
+  geom_jitter(size = 1.5, alpha = 1, width = 0.15, height = 0, shape=1) +
+  
+  # Line and points with error bars for predicted values
+  geom_path(data = dat.new, aes(x = dpi.f, y = yhat, group = primary_treatment,
+                                color = primary_treatment), alpha=0.75) +
+  geom_errorbar(data = dat.new, aes(ymin = Lower, ymax = Upper, x = dpi.f, y = yhat),
+                color = "black", width = 0.1) +
+  geom_point(data = dat.new, aes(x = dpi.f, y = yhat, color = primary_treatment),
+             size = 2, alpha = 0.75, shape = 16) +
+  geom_point(data = dat.new, aes(x = dpi.f, y = yhat),
+             color = "black", size = 2, alpha = 1, shape = 1, stroke = 0.1) +
+  
+  # V2 (CV^2) points and confidence intervals
+  geom_point(data = a.cv, aes(x = dpi.f, y = bird_pv, fill = primary_treatment, shape = "PV"),
+             size = 3, alpha = 0.2) +
+  geom_errorbar(data = a.cv, aes(x = dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci,
+                                 group = primary_treatment, color = primary_treatment),
+                width = 0.05, alpha = 0.02) +
+  geom_path(data = a.cv, aes(x = dpi.f, y = bird_pv, color = primary_treatment,
+                             group = primary_treatment), lty = "dashed", alpha=0.2) +
+
+  # Labels and axis
+  labs(y = "Anti-MG IgY Antibody Levels [OD]", 
+       x = "Days Post Primary Inoculation", 
+       shape = "Variability Metric", 
+       color = "Primary Treatment", 
+       fill = "Primary Treatment") +
+  
+  # Custom color and fill scales
+  scale_color_manual(values = c(pri_colors)) +
+  scale_fill_manual(values = c(pri_colors)) +
+
+  # Custom shape scale for V2 (CV^2)
+  scale_shape_manual(
+    name = "Variability Metric",
+    values = c("PV" = 17),  # Set shape type for CV^2
+    labels = c("PV" = "PV")
+  ) +
+  
+  # Theme settings
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(color = "black", size = 15, face = "bold"),
+    axis.text.y = element_text(color = "black", face = "bold", size = 15),
+    axis.text.y.right = element_text(color = "black", face = "bold", size = 15),
+    axis.title.y.right = element_text(color = "black", size = 20, face = "bold"),
+    axis.title.x = element_text(size = 20),
+    axis.text.x = element_text(size = 15),
+    legend.background = element_rect(size = 0.25, linetype = "solid"),
+    legend.position = "top",
+    legend.direction = "horizontal"
+  )
+```
+
+
+```{r Antibodies and Variability Figure 2}
+#Just variability
+ggplot() +
+  # CV points and confidence intervals
+  geom_point(data = a.cv, aes(x = dpi.f, y = bird_cv, color = primary_treatment, shape = "CV"), 
+             size = 3, position = position_dodge(width = 0.6), alpha = 0.5) +
+  geom_path(data = a.cv, aes(x = dpi.f, y = bird_cv, color = primary_treatment), 
+            position = position_dodge(width = 0.6)) +
+  geom_errorbar(data = a.cv, aes(x = dpi.f, ymin = cv_lower_ci, ymax = cv_upper_ci,
+                                 color = primary_treatment, shape = "CV",), lty="dashed",
+                width = 0.15, position = position_dodge(width = 0.6), alpha=0.05) +
+  
+  # PV points and confidence intervals
+  geom_point(data = a.cv, aes(x = dpi.f, y = bird_pv, color = primary_treatment, shape = "PV"), 
+             size = 3, position = position_dodge(width = 0.3), alpha = 0.5) +
+  geom_errorbar(data = a.cv, aes(x = dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, 
+                                 color = primary_treatment, shape = "PV"), lty="dashed",
+                width = 0.15, position = position_dodge(width = 0.3), alpha=0.05) +
+  
+  # V2 points and confidence intervals
+  geom_point(data = a.cv, aes(x = dpi.f, y = bird_v2, color = primary_treatment, shape = "V2"), 
+             size = 3, position = position_dodge(width = 0.9), alpha = 1) +
+  geom_errorbar(data = a.cv, aes(x = dpi.f, ymin = v2_lower_ci, ymax = v2_upper_ci, 
+                                 color = primary_treatment, shape = "V2"), 
+                width = 0.15, position = position_dodge(width = 0.9)) +
+  
+  # Custom color and fill scales
+  scale_color_manual(values = c(pri_colors)) +
+  scale_fill_manual(values = c(pri_colors)) +
+  
+  # Shape legend to distinguish metrics
+  scale_shape_manual(
+    name = "Variability Metric",
+    values = c("V2" = 16, "CV" = 0, "PV" = 2),
+    labels = c("V2" = "CV^2", "CV" = "CV", "PV" = "PV")
+  ) +
+  
+  # Labels and theme
+  labs(y = "Variability Metric Value", 
+       x = "Days Post Primary Inoculation", 
+       color = "Primary Treatment") +
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(color = "black", size = 20, face = "bold"),
+    axis.text.y = element_text(color = "black", face = "bold", size = 15),
+    axis.text.y.right = element_text(color = "black", face = "bold", size = 15),
+    axis.title.y.right = element_text(color = "black", size = 20, face = "bold"),
+    axis.title.x = element_text(size = 20),
+    axis.text.x = element_text(size = 15),
+    legend.background = element_rect(size = 0.25, linetype = "solid"),
+    legend.position = "top",
+    legend.direction = "horizontal"
+  )#+
+  coord_flip()
+
+```
+
+```{r CV for Gamma Distributed Antibodies}
+library(MASS)
+
+fit_ab <- p.aba %>%
+  filter(dpi.f %in% c(-8, 14, 41))%>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    shape = fitdistr(na.omit(elisa_od), "gamma")$estimate["shape"],
+    rate = fitdistr(na.omit(elisa_od), "gamma")$estimate["rate"]
+  ) %>%
+  ungroup()
+
+fit_ab <- fit_ab %>%
+  mutate(cv = 1 / sqrt(shape))
+
+ggplot(fit_ab, aes(x=dpi.f, y=cv, color=primary_treatment))+
+  geom_point()+
+  scale_color_manual(values=c(pri_colors))
+
+
+# Function to calculate CV for gamma distribution
+
+
+library(MASS)
+library(dplyr)
+library(purrr)
+
+# Function to calculate gamma CV
+calculate_gamma_cv <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return(1 / sqrt(shape))
+    }
+  }
+  return(NA)
+}
+
+# Function to calculate gamma V2
+calculate_gamma_V2 <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return((1 + shape)^(-1/2))
+    }
+  }
+  return(NA)
+}
+
+# Set the number of bootstrap replicates
+n_boot <- 1000
+
+# Pipeline to calculate gamma CV, gamma V2, and 95% CI
+a.gcv <- p.aba %>%
+  group_by(dpi.f, primary_treatment) %>%
+  drop_na(elisa_od) %>%
+  dplyr::reframe(
+    # Original data calculations
+    elisa_od = elisa_od,
+    mean_od = mean(elisa_od, na.rm = TRUE),
+    bird_sd = sd(elisa_od, na.rm = TRUE),
+    band_number = band_number,
+    
+    bird_gamma_cv = calculate_gamma_cv(elisa_od),   # Gamma CV for original data
+    bird_gamma_V2 = calculate_gamma_V2(elisa_od),   # Gamma V2 for original data
+
+    # Bootstrap for gamma CV and V2 separately
+    gamma_cv_bootstrap = list(replicate(n_boot, calculate_gamma_cv(sample(elisa_od, replace = TRUE)))),
+    gamma_V2_bootstrap = list(replicate(n_boot, calculate_gamma_V2(sample(elisa_od, replace = TRUE))))
+  ) %>%
+  # Extract gamma CV and V2 bootstrap estimates and calculate 95% confidence intervals
+  mutate(
+    gamma_cv_lower_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+
+    gamma_V2_lower_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_V2_upper_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Optionally, remove the bootstrap columns to clean up the dataset
+  select(-gamma_cv_bootstrap, -gamma_V2_bootstrap) %>%
+  ungroup()
+
+# Add to the main dataset and calculate group summaries
+p.aba.g <- left_join(p.aba, a.gcv, by = c("dpi.f", "primary_treatment", "band_number")) %>%
+  select(-elisa_od.y) %>%
+  mutate(elisa_od = elisa_od.x) %>%
+  select(-elisa_od.x) %>%
+  filter(dpi.f %in% c(-8, 14, 41))
+
+summary_tibble_gamma <- a.gcv %>%
+  group_by(dpi.f, primary_treatment) %>%
+  summarize(
+    mean_bird_gamma_cv = mean(bird_gamma_cv, na.rm = TRUE),  # Mean gamma CV for each group
+    mean_bird_gamma_V2 = mean(bird_gamma_V2, na.rm = TRUE),  # Mean V2 for each group
+    mean_bird_sd = mean(bird_sd, na.rm = TRUE),              # Mean of bird_sd
+    avg_elisa_od = mean(elisa_od, na.rm = TRUE),             # Mean elisa_od for each group
+    n_individuals = n_distinct(band_number)                  # Number of individuals in each group
+  ) %>%
+  as_tibble()
+
+print(summary_tibble_gamma)
+
+
+
+ggplot() +
+  # Plotting mean gamma CV with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_gamma_cv, color = primary_treatment, shape = "Gamma CV"), size = 3, position = position_dodge(width = 0.25)) +
+  geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_gamma_cv, ymin = gamma_cv_lower_ci, ymax = gamma_cv_upper_ci, color = primary_treatment), linetype="dotted", position = position_dodge(width = 0.25), width = 0.2) +
+
+  # Plotting mean gamma V2 with error bars
+  geom_point(data = summary_tibble_gamma, aes(x = dpi.f, y = mean_bird_gamma_V2, color = primary_treatment, shape = "Gamma V2"), size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(data = a.gcv, aes(x = dpi.f, y = bird_gamma_V2, ymin = gamma_V2_lower_ci, ymax = gamma_V2_upper_ci, color = primary_treatment), position = position_dodge(width = 0.5), width = 0.2, linetype = "dashed") +
+
+  # Plotting mean PV with error bars
+  geom_point(data = a.cv, aes(x = dpi.f, y = bird_pv, color = primary_treatment, shape = "PV"), size = 3, position = position_dodge(width = 0.75)) +
+  geom_errorbar(data = a.cv, aes(x = dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, color = primary_treatment), linetype = "solid", width = 0.2, alpha = 0.05, position = position_dodge(width = 0.75)) +
+
+  # Custom colors
+  scale_color_manual(values = pri_colors) +
+  
+  # Define shapes for each metric in the legend
+  scale_shape_manual(values = c("Gamma CV" = 21, "Gamma V2" = 22, "PV" = 16)) +
+
+  # Labels
+  labs(y = "Gamma CV / Gamma V2 / PV", x = "DPI", title = "Gamma CV, Gamma V2, and PV of Antibodies by DPI and Treatment", shape = "Variability Metric") +
+  
+  # Legends and themes
+  theme_minimal() 
+```
+
+
+```{r Calculate Variability in eye score}
+#eye score
+e.cv <- p.aba %>% 
+  group_by(dpi, primary_treatment) %>%
+  filter(inf_pri == 1)%>%
+  reframe(
+    bird_cv = calculate_cv(tes.new),
+    bird_sd = sd(tes.new),
+    bird_pv = calculate_pv(tes.new),
+    bird_v2 = calculate_v2(tes.new),
+    dpi.f = dpi.f,
+    tes.new = tes.new,
+    
+    # Bootstrap for confidence intervals
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(tes.new, replace = TRUE)))),
+    v2_bootstrap = list(replicate(n_boot, calculate_v2(sample(tes.new, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(tes.new, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975)),
+    v2_lower_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.025)),
+    v2_upper_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.975)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975))
+  ) %>%
+  # Remove bootstrap columns
+  select(-cv_bootstrap, -v2_bootstrap, -pv_bootstrap) %>%
+  ungroup()
+```
+
+```{r Visualize Variability in Eye Score}
+ggplot(e.cv)+
+  #geom_jitter(aes(x=dpi.f, y=tes.new, color=primary_treatment))+
+  geom_point(aes(x=dpi.f, y=bird_pv, color=primary_treatment, shape="PV"), size=2)+
+  geom_point(aes(x=dpi.f, y=bird_v2, color=primary_treatment, shape="V2"), size=2, position=position_dodge(width=0.5))+
+  # geom_point(aes(x=dpi.f, y=bird_cv, color=primary_treatment, shape="CV"), size=2, position=position_dodge(width=0.75))+
+  #  geom_errorbar(aes(x=dpi.f, ymin = cv_lower_ci, ymax = cv_upper_ci, y=bird_cv, color=primary_treatment), width=0.2, lty="dotted", position=position_dodge(width=0.75))+
+  geom_errorbar(aes(x=dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, y=bird_pv, color=primary_treatment), width=0.2, lty="dashed")+
+  geom_errorbar(aes(x=dpi.f, ymin = v2_lower_ci, ymax = v2_upper_ci, y=bird_v2, color=primary_treatment), position=position_dodge(width=0.5) , width=0.2)+
+ scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 15, "PV" = 17, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  scale_color_manual(values=(pri_colors[c(2, 3)]))+
+  labs(x="Days Post Inoculation", y="Variability", shape="Variability Metric", color="Primary Treatment")
+
+ggplot(e.cv)+
+  geom_jitter(aes(x=dpi.f, y=tes.new, color=primary_treatment), height=0, width=0.1, alpha=0.5)+
+  scale_color_manual(values=(pri_colors[c(2, 3)]))+
+  facet_wrap(~primary_treatment)
+```
+Strongly depends on what measure of variability I use - use PV for eye score becuase of zero inflation
+--------
+I use raw quantity data because I want to capture heterogeneity as it applies to transmission-relevant traits. I don't want to reduce the impact of "outliers" as those data represent individuals that may play an outsized role in seeding/propagating epidemics.
+```{r Calculate Raw Path Load Variability in infected birds primary infection}
+#path load
+q.cv <- p.aba %>% 
+  group_by(dpi, primary_treatment) %>%
+  filter(inf_pri ==1)%>%
+  drop_na(quantity1) %>%
+  reframe(
+    bird_cv = calculate_cv(quantity1),
+    bird_pv = calculate_pv(quantity1),
+    bird_v2 = calculate_v2(quantity1),
+    dpi.f = dpi.f,
+    quantity1 = quantity1,
+    inf_pri = inf_pri,
+    
+    # Bootstrap for confidence intervals
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(quantity1, replace = TRUE)))),
+    v2_bootstrap = list(replicate(n_boot, calculate_v2(sample(quantity1, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(quantity1, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975)),
+    v2_lower_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.025)),
+    v2_upper_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.975)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975))
+  ) %>%
+  # Remove bootstrap columns
+  select(-cv_bootstrap, -v2_bootstrap, -pv_bootstrap) %>%
+  ungroup()
+```
+
+```{r With Gamma Distributed variability metrics}
+# Functions for gamma CV and V2 based on gamma distribution parameters
+calculate_gamma_cv <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return(1 / sqrt(shape))
+    }
+  }
+  return(NA)
+}
+
+calculate_gamma_V2 <- function(data) {
+  data <- na.omit(data)
+  if (length(data) > 1) {
+    fit <- tryCatch(
+      fitdistr(data, "gamma"),
+      error = function(e) return(NA)
+    )
+    if (!is.na(fit[1])) {
+      shape <- fit$estimate["shape"]
+      return((1 + shape)^(-1/2))
+    }
+  }
+  return(NA)
+}
+
+# Set number of bootstrap replicates
+n_boot <- 1000
+
+# Main data processing pipeline
+q.cv <- p.aba %>%
+  group_by(dpi, primary_treatment) %>%
+  filter(inf_pri == 1 & dpi.f %in% c(-8, 7, 41)) %>%
+  drop_na(quantity1) %>%
+  dplyr::reframe(
+    # Original data metrics
+    bird_cv = calculate_cv(quantity1),
+    bird_pv = calculate_pv(quantity1),
+    bird_v2 = calculate_v2(quantity1),
+    bird_gamma_cv = calculate_gamma_cv(quantity1),
+    bird_gamma_V2 = calculate_gamma_V2(quantity1),
+    
+    dpi.f = dpi.f,
+    quantity1 = quantity1,
+    inf_pri = inf_pri,
+    
+    # Bootstrapping for CV, PV, V2, and gamma metrics
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(quantity1, replace = TRUE)))),
+    v2_bootstrap = list(replicate(n_boot, calculate_v2(sample(quantity1, replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(quantity1, replace = TRUE)))),
+    gamma_cv_bootstrap = list(replicate(n_boot, calculate_gamma_cv(sample(quantity1, replace = TRUE)))),
+    gamma_V2_bootstrap = list(replicate(n_boot, calculate_gamma_V2(sample(quantity1, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals for all metrics
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    
+    gamma_cv_lower_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_cv_upper_ci = map_dbl(gamma_cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    gamma_V2_lower_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    gamma_V2_upper_ci = map_dbl(gamma_V2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Remove bootstrap columns to clean up the dataset
+  select(-cv_bootstrap, -v2_bootstrap, -pv_bootstrap, -gamma_cv_bootstrap, -gamma_V2_bootstrap) %>%
+  ungroup()
+
+# View the resulting data
+print(q.cv)
+
+# Create summary table
+summary_q_cv <- q.cv %>%
+  group_by(dpi, primary_treatment) %>%
+  summarize(
+    # Mean values for each metric
+    mean_bird_cv = mean(bird_cv, na.rm = TRUE),
+    mean_bird_pv = mean(bird_pv, na.rm = TRUE),
+    mean_bird_v2 = mean(bird_v2, na.rm = TRUE),
+    mean_bird_gamma_cv = mean(bird_gamma_cv, na.rm = TRUE),
+    mean_bird_gamma_V2 = mean(bird_gamma_V2, na.rm = TRUE),
+    
+    # 95% Confidence Intervals for each metric
+    cv_lower_ci = mean(cv_lower_ci, na.rm = TRUE),
+    cv_upper_ci = mean(cv_upper_ci, na.rm = TRUE),
+    
+    v2_lower_ci = mean(v2_lower_ci, na.rm = TRUE),
+    v2_upper_ci = mean(v2_upper_ci, na.rm = TRUE),
+    
+    pv_lower_ci = mean(pv_lower_ci, na.rm = TRUE),
+    pv_upper_ci = mean(pv_upper_ci, na.rm = TRUE),
+    
+    gamma_cv_lower_ci = mean(gamma_cv_lower_ci, na.rm = TRUE),
+    gamma_cv_upper_ci = mean(gamma_cv_upper_ci, na.rm = TRUE),
+    
+    gamma_V2_lower_ci = mean(gamma_V2_lower_ci, na.rm = TRUE),
+    gamma_V2_upper_ci = mean(gamma_V2_upper_ci, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# View the summary table
+print(summary_q_cv)
+```
+
+
+Low dose birds are more variable in their pathogen loads during primary infection than high dose birds.
+```{r Visualize in infected birds primary infection}
+ggplot(q.cv)+
+  #geom_jitter(aes(x=dpi.f, y=quantity1, color=primary_treatment))+
+  geom_point(aes(x=dpi.f, y=bird_pv, color=primary_treatment, shape="PV"), size=3, position=position_dodge(width=0.5))+
+  geom_point(aes(x=dpi.f, y=bird_v2, color=primary_treatment, shape="V2"), size=3, position=position_dodge(width=0.5))+
+  #geom_point(aes(x=dpi.f, y=bird_cv, color=primary_treatment, shape="CV"), size=2, position=position_dodge(width=0.75))+
+  #geom_errorbar(aes(x=dpi.f, ymin = cv_lower_ci, ymax = cv_upper_ci, y=bird_cv, color=primary_treatment), width=0.2, lty="dotted", position=position_dodge(width=0.75))+
+  geom_errorbar(aes(x=dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, y=bird_pv, color=primary_treatment), width=0.2, lty="dashed", position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x=dpi.f, ymin = v2_lower_ci, ymax = v2_upper_ci, y=bird_v2, color=primary_treatment), position=position_dodge(width=0.5), width=0.2)+
+ scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 15, "PV" = 17, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  scale_color_manual(values=c(pri_colors[c(2, 3)]))+
+  labs(title="Path Load Variability", y="Variability Metric", x="DPI", lty="Variability Metric", color="Primary Treatment")
+
+ggplot(q.cv)+
+  geom_jitter(aes(x=dpi.f, y=quantity1, color=primary_treatment), height=0, width=0.25, alpha=0.5)+
+  geom_hline(yintercept = 50, alpha=0.25)+
+  scale_color_manual(values=c(pri_colors[c(2, 3)]))
+```
+
+
+```{r Log10 Quantity Variability}
+p.aba$quantity1 <- p.aba$quantity1+0.0001
+q.cv.log <- p.aba %>% 
+  group_by(dpi, primary_treatment) %>%
+  drop_na(quantity1) %>%
+  reframe(
+    bird_cv = calculate_cv(log10(quantity1)),
+    bird_pv = calculate_pv(log10(quantity1)),
+    bird_v2 = calculate_v2(log10(quantity1)),
+    dpi.f = dpi.f,
+    quantity1 = quantity1,
+    
+    # Bootstrap for confidence intervals
+    cv_bootstrap = list(replicate(n_boot, calculate_cv(sample(log10(quantity1), replace = TRUE)))),
+    v2_bootstrap = list(replicate(n_boot, calculate_v2(sample(log10(quantity1), replace = TRUE)))),
+    pv_bootstrap = list(replicate(n_boot, calculate_pv(sample(log10(quantity1), replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals
+  mutate(
+    cv_lower_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci = map_dbl(cv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci = map_dbl(v2_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci = map_dbl(pv_bootstrap, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Remove bootstrap columns
+  select(-cv_bootstrap, -v2_bootstrap, -pv_bootstrap) %>%
+  ungroup()
+```
+
+Variability here is funky because there are values below 50 (infection cutoff) that are affecting variability metrics.
+```{r Log Quantity Variability}
+hist(log10(q.cv.log$quantity1))
+ggplot(q.cv.log %>% filter(primary_treatment != "Sham"))+
+  #geom_jitter(aes(x=dpi.f, y=log10(quantity1), color=primary_treatment))+
+  geom_point(aes(x=dpi.f, y=bird_pv, color=primary_treatment, shape="PV"), size=3)+
+  geom_point(aes(x=dpi.f, y=bird_v2, color=primary_treatment, shape="V2"), size=3, position=position_dodge(width=0.2))+
+  geom_errorbar(aes(x=dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, y=bird_pv, color=primary_treatment), width=0.2, lty="dashed")+
+  geom_errorbar(aes(x=dpi.f, ymin = v2_lower_ci, ymax = v2_upper_ci, y=bird_v2, color=primary_treatment), position=position_dodge(width=0.2) , width=0.2)+
+  scale_color_manual(values=c(pri_colors[c(2,3)]))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("PV" = 17, "V2" = 18),  # Assign shapes
+                     labels = c("PV" = "PV", "V2" = "CV^2")) +
+  labs(title="Log10(Quantity) Variability", y="Variability", x="DPI")
+
+ggplot(q.cv.log)+
+  geom_jitter(aes(x=dpi.f, y=log10(quantity1), color=primary_treatment), height=0, width=0.25, alpha=0.5)+
+  scale_color_manual(values = c(pri_colors))+
+  geom_hline(yintercept = log10(50.001))
+
+ggplot(q.cv.log %>% filter(primary_treatment != "Sham"))+
+  #geom_jitter(aes(x=dpi.f, y=log10(quantity1), color=primary_treatment))+
+  geom_point(aes(x=dpi.f, y=bird_pv, color=primary_treatment, shape="PV Log"), position = position_dodge(width=0.3))+
+  #geom_point(aes(x=dpi.f, y=bird_v2, color=primary_treatment, shape="V2"), position=position_dodge(width=0.2))+
+  geom_errorbar(aes(x=dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, y=bird_pv, color=primary_treatment), position = position_dodge(width=0.3), width=0.1, lty="solid")+
+  # geom_errorbar(aes(x=dpi.f, ymin = v2_lower_ci, ymax = v2_upper_ci, y=bird_v2, color=primary_treatment), position=position_dodge(width=0.2) , width=0.2)+
+   geom_point(data=q.cv, aes(x=dpi.f, y=bird_pv, color=primary_treatment, shape="PV Raw"), size=3, position=position_dodge(width=0.5))+
+  geom_errorbar(data=q.cv, aes(x=dpi.f, ymin = pv_lower_ci, ymax = pv_upper_ci, y=bird_pv, color=primary_treatment), width=0.2, lty="dashed", position=position_dodge(width=0.5))+
+  scale_color_manual(values=c(pri_colors[c(2,3)]))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("PV Log" = 17, "PV Raw" = 23),  # Assign shapes
+                     labels = c("PV Log" = "PV Log", "PV Raw" = "PV Raw")) +
+  labs(title="Log10(Quantity) vs Raw Quantity Variability", y="Variability", x="DPI")
+```
+Use PV for quantity variability
+
+Low dose birds are more variable in their pathogen loads during primary infection than high dose birds, but less variable
+#####Secondary Infection
+
+```{r Remove Birds That Did Not Resolve Infection By DPI 42}
+#omit from dataset - were still infected (path load) on day 41 prior to reinfection day 42
+m.ab <- m.ab %>%
+  filter(!(band_number %in% c(2274, 2469, 2520, 2494)))
+
+m.ab %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=dpi
+  )%>%
+  modify_header(
+    label ~ "**FINAL SAMPLE SIZES SECONDARY**"
+  )
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose)%>%
+  tbl_summary(
+    by=primary_treatment
+  )
+```
+#####Do Antibody Levels During Primary Infection Predict Susceptibility to Reinfection?
+```{r Set Theme for Susceptibility Graphs}
+sus_theme_pre <- theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.title.x = element_blank(),  # Remove the x-axis title
+    axis.title.y = element_text(size = 15, face="bold"),
+    plot.title = element_text(hjust = 0.5),  # Center the plot title
+    legend.position = "top",
+    legend.text = element_text(size = 15),
+    legend.title = element_text(size = 15),
+    legend.background = element_rect(size = 0.25, linetype = "solid"),
+    strip.text = element_text(size = 10)  # Adjust the size of facet labels
+  )
+
+sus_theme_14 <- theme(
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  axis.title.y = element_text(size = 15, face="bold"),
+  legend.position = "none",  # Remove the legend
+  plot.title = element_blank(),  # Remove the plot title
+  axis.title.x = element_blank(),  # Remove the x-axis title
+  legend.text = element_blank(),  # Remove the legend text
+  legend.title = element_blank(),  # Remove the legend title
+  legend.background = element_blank(),  # Remove the legend background
+  strip.text = element_text(size = 10)  # Adjust the size of facet labels
+)
+
+sus_theme_41 <- theme(
+  axis.text.x = element_text(angle = 45, hjust = 1), 
+  axis.title.y = element_text(size = 15, face="bold"),
+  legend.position = "none",  # Remove the legend
+  plot.title = element_blank(),  # Remove the plot title
+  axis.title.x = element_text(size=15, face="bold"), 
+  legend.text = element_blank(),  # Remove the legend text
+  legend.title = element_blank(),  # Remove the legend title
+  legend.background = element_blank(),  # Remove the legend background
+  strip.text = element_text(size = 10)  # Adjust the size of facet labels
+)
+```
+
+```{r Format Pre Antibodies}
+m.ab.w <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                sex, elisa_od, inf_sec)%>%
+  filter(dpi %in% c(-8, 14, 41))
+
+wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
+                                 names_glue = "{.value}_{dpi}",
+                                 values_from = elisa_od)
+
+wibird$elisa_od_pre <- wibird$`elisa_od_-8`
+
+wibird <- wibird %>% mutate(totalTES = sum())
+wibird$sec_dose.n <- wibird$secondary_dose+1
+wibird$log10.sec_dose <- round(log10(wibird$sec_dose.n), digits = 2)
+
+wibird$log10.sec_dose <- as.numeric(wibird$log10.sec_dose)
+
+wibird$secondary_dose_fct <- factor(wibird$secondary_dose, levels = c(0, 30, 100, 300, 7000))
+
+sec_dose_names <- c(
+  "0" = "0",
+  "1.49" = "30",
+  "2" = "100",
+  "2.48" = "300",
+  "3.85" = "7000"
+)
+```
+
+```{r Is susceptibility to reinfection predicted by antibody levels 8 days before infection?}
+glm.ab.pre <- glm(inf_sec ~ elisa_od_pre + log10.sec_dose, data=wibird, family=binomial())
+summary(glm.ab.pre)
+car::Anova(glm.ab.pre, type = 3)
+simulateResiduals(glm.ab.pre, plot=T)
+
+mod <- glm.ab.pre
+dat.new=expand.grid(log10.sec_dose=unique(wibird$log10.sec_dose),
+                    inf_sec=unique(wibird$inf_sec),
+                    elisa_od_pre = unique(wibird$elisa_od_pre))#new grid to put predictions into
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(mod)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+#names
+wibird$dpi <- "DPPI -8"
+dpi_namespre <- c(
+  "DPPI -8" = "DPPI -8"
+)
+
+sus_pre_raw<-ggplot(wibird, aes(x=(elisa_od_pre), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_point(alpha=0.5)+
+  geom_line(data=dat.new, aes(x=(elisa_od_pre), y=yhat), alpha = 1, size =1)+
+  geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_pre, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) +
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(y=" ", color="Secondary Dose", fill ="Secondary Dose")+
+  scale_x_continuous(labels = scales::number_format(accuracy = 0.01))+
+  facet_grid(~dpi ~log10.sec_dose, labeller = as_labeller(c(dpi_namespre, sec_dose_names)))
+sus_pre_raw
+```
+
+```{r Format DPI 14 Antibodies}
+m.ab.w <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                sex, elisa_od, inf_sec)%>%
+  filter(dpi %in% c(-8, 14, 41))
+
+wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
+                                 names_glue = "{.value}_{dpi}",
+                                 values_from = elisa_od)
+wibird14 <- wibird %>%
+  drop_na(elisa_od_14)
+
+wibird14 <- wibird14 %>% mutate(totalTES = sum())
+wibird14$sec_dose.n <- wibird14$secondary_dose+1
+wibird14$log10.sec_dose <- round(log10(wibird14$sec_dose.n), digits = 2)
+
+wibird14$log10.sec_dose <- as.numeric(wibird14$log10.sec_dose)
+```
+
+```{r Are Antibody Levels on Day 14 Predictive of Susceptibility?}
+glm.ab14 <- glm(inf_sec ~ elisa_od_14 + log10.sec_dose, data=wibird14, family=binomial())
+summary(glm.ab14)
+car::Anova(glm.ab14, type = 3)
+simulateResiduals(glm.ab14, plot=T)
+
+mod <- glm.ab14
+dat.new=expand.grid(log10.sec_dose=unique(wibird14$log10.sec_dose),
+                    inf_sec=unique(wibird14$inf_sec),
+                    elisa_od_14 = unique(wibird14$elisa_od_14))
+# elisa_od_14 = unique(wibird14$elisa_od_14))
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(mod)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+wibird14$dpi <- "DPPI 14"
+dpi_names14 <- c(
+  "DPPI 14" = "DPPI 14"
+)
+
+sus_14_raw<-ggplot(wibird14, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_line(data=dat.new, aes(x=(elisa_od_14), y=yhat), alpha = 1, size =1)+
+  geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_14, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) +
+  geom_point(alpha=0.5, size=2)+
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(y= "Infection Status Upon Secondary Challenge (0|1)", color="Secondary Dose", fill ="Secondary Dose")+
+  scale_x_continuous(labels = scales::number_format(accuracy = 0.01))+
+  facet_grid(~dpi~log10.sec_dose, labeller = as_labeller(c(dpi_names14,sec_dose_names)))
+sus_14_raw
+
+```
+
+```{r Format DPI 41 Antibodies}
+wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
+                                 names_glue = "{.value}_{dpi}",
+                                 values_from = elisa_od)
+
+wibird41 <- wibird %>%
+  drop_na(elisa_od_41)
+
+wibird41 <- wibird41 %>% mutate(totalTES = sum())
+wibird41$sec_dose.n <- wibird41$secondary_dose+1
+wibird41$log10.sec_dose <- round(log10(wibird41$sec_dose.n), digits = 2)
+
+wibird41$log10.sec_dose <- as.numeric(wibird41$log10.sec_dose)
+```
+
+```{r Are Antibody Levels on Day 41 Predictive of Susceptibility to Reinfection?}
+glm.ab41 <- glm(inf_sec ~ elisa_od_41 + log10.sec_dose, data=wibird41, family=binomial())
+
+summary(glm.ab41)
+car::Anova(glm.ab41, type = 3)
+simulateResiduals(glm.ab41, plot=T)
+
+mod <- glm.ab41
+dat.new=expand.grid(log10.sec_dose=unique(wibird41$log10.sec_dose),
+                    inf_sec=unique(wibird41$inf_sec),
+                    #elisa_od_14_new=unique(wibird41$elisa_od_14_new),
+                    elisa_od_41 = unique(wibird41$elisa_od_41))
+dat.new$yhat=predict(mod, type="response", newdata = dat.new)
+#prediction intervals
+preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
+#bind se's and fitted points
+dat.new = cbind(dat.new, preds)
+#inverse link function
+ilink <- family(mod)$linkinv
+#back transform CIs
+dat.new <- transform(dat.new,
+                     Fitted = ilink(fit),
+                     Upper = ilink(fit + (2*se.fit)),
+                     Lower = ilink(fit - (2*se.fit)))
+
+wibird41$dpi <- "DPPI 41"
+dpi_names41 <- c(
+  "DPPI 41" = "DPPI 41"
+)
+
+sus_41_raw<-ggplot(wibird41, aes(x=(elisa_od_41), y=(inf_sec), color=as.factor(log10.sec_dose)))+
+  geom_point(alpha=0.5)+
+  geom_line(data=dat.new, aes(x=(elisa_od_41), y=yhat), alpha = 1, size =1)+
+  geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) +
+  scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
+  labs(x="IgY Antibody Levels", y= " ", color="Secondary Dose", fill ="Secondary Dose")+
+  scale_x_continuous(labels = scales::number_format(accuracy = 0.01))+
+  facet_grid(~dpi~log10.sec_dose, labeller = as_labeller(c(dpi_names41,sec_dose_names)))
+sus_41_raw
+```
+
+```{r}
+library("grid")
+library(cowplot)
+r1 <- sus_pre_raw + sus_theme_pre
+r2 <- sus_14_raw + sus_theme_14
+r3 <- sus_41_raw + sus_theme_41
+legend <-get_legend(r1)
+r1 <- r1 + theme(legend.position = "none")
+
+Raw_all <- arrangeGrob(
+  legend,
+  arrangeGrob(r1, r2, r3, ncol = 1),
+  ncol = 1,
+  heights = c(1, 10)
+)
+
+grid.newpage()
+grid.draw(Raw_all)
+```
+
+####Do antibody levels in susceptible birds predict pathogen load or eye score?
+```{r Format wide data}
+m.ab.w <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                sex, elisa_od, inf_sec, inf_pri)%>%
+  filter(dpi %in% c(-8, 14, 41, 56))
+
+wibird <- m.ab.w %>% pivot_wider(names_from = dpi,
+                                 names_glue = "{.value}_{dpi}",
+                                 values_from = elisa_od)
+
+m.ab.w.tes <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                sex, tes, inf_sec, inf_pri)%>%
+  filter(dpi %in% c(-8, 14, 41, 56))
+wibird.tes <- m.ab.w.tes %>% pivot_wider(names_from = dpi,
+                                     names_glue = "{.value}_{dpi}",
+                                     values_from = tes)
+
+m.ab.w.quant <- m.ab %>% 
+  dplyr::select(dpi, band_number, primary_treatment, secondary_dose,
+                sex, quantity1, inf_sec, inf_pri)%>%
+  filter(dpi %in% c(-8, 14, 41, 56))
+wibird.quant <- m.ab.w.quant %>% pivot_wider(names_from = dpi,
+                                         names_glue = "{.value}_{dpi}",
+                                         values_from = quantity1)
+
+wibird.all <- left_join(wibird, wibird.quant, by="band_number")
+wibird.all <- left_join(wibird.all, wibird.tes, by="band_number")
+wibird.all <- wibird.all %>%
+  select(-primary_treatment.y, -secondary_dose.y, -sex.y, -inf_sec.y, -inf_pri.y, -primary_treatment.x, -secondary_dose.x, -sex.x, -inf_sec.x, -inf_pri.x)
+head(wibird.all)
+```
+Antibody levels do not predict path load or eye score dpi 56
+```{r Do antibody levels on dpi 41 predict path load or eye score dpi 56?}
+wibird.all$quantity1_56.log <- log10(wibird.all$quantity1_56)
+wibird.all.41 <- wibird.all %>%
+  drop_na(elisa_od_41)
+
+glm.ab.quant <- glmmTMB(quantity1_56.log+.01 ~ elisa_od_41 + primary_treatment, data=wibird.all.41, family=Gamma())
+summary(glm.ab.quant)
+
+glm.ab.tes <- glmmTMB(tes_56+0.001 ~ elisa_od_41 + primary_treatment, data=wibird.all.41, family = Gamma())
+summary(glm.ab.tes)
+hist(wibird.all.41$tes_56)
+ggplot(wibird.all, aes(x=elisa_od_41, y=quantity1_56.log, color=primary_treatment))+
+  geom_point()+
+  scale_color_manual(values=c(pri_colors))+
+  geom_smooth(aes(groups=primary_treatment), method="glm")
+
+```
+Antibody levels do not predict path load or eye score dpi 56
+```{r Do antibody levels on dpi 14 predict path load or eye score dpi 56?}
+wibird.all.14 <- wibird.all %>%
+  drop_na(elisa_od_14)
+
+glm.ab.quant <- glmmTMB(quantity1_56.log+.01 ~ elisa_od_14 + primary_treatment, data=wibird.all.14, family=Gamma())
+summary(glm.ab.quant)
+
+glm.ab.tes <- glmmTMB(tes_56+0.001 ~ elisa_od_14 + primary_treatment, data=wibird.all.14, family = Gamma())
+summary(glm.ab.tes)
+```
+
+####Variability combined with Hawley et al., 2024 Susceptibility####
+```{r}
+####Variability With Hawley et al., 2024####
+summary_df <- a.cv %>%
+  filter(dpi.f == 41) %>%
+  group_by(primary_treatment) %>%
+  summarize(
+    mean_bird_pv = mean(bird_pv, na.rm = TRUE),
+    mean_bird_cv = mean(bird_cv, na.rm = TRUE),
+    mean_mean_od = mean(mean_od, na.rm = TRUE)
+  )
+
+summary_df
+dose <- c("Sham", "Low", "High")
+CV <- as.numeric(c(0.899, 1.630, 2.511))
+ab.pv <- as.numeric(c(0.04156784, 0.14716858, 0.18885516))
+ab.cv <- as.numeric(c(0.03997555, 0.17202405, 0.26176249))
+ci_lower_cv <- as.numeric(c(0.0230, 0.119, 0.165))
+ci_upper_cv <- as.numeric(c(0.0409, 0.206, 0.339))
+ci_lower_pv <- as.numeric(c(0.0246, 0.0998, 0.144))
+ci_upper_pv <- as.numeric(c(0.0452, 0.178, 0.231))
+mean_sus <- as.numeric(c(1.181, 0.446, 0.192))
+mean_ab <- as.numeric(c(0.045, 0.04786, 0.0579))
+dpi <- 41
+
+
+
+het.df <- data.frame(dose, CV, mean_sus, ab.pv, ab.cv, dpi, mean_ab, ci_lower_cv, ci_upper_cv, ci_lower_pv, ci_upper_pv)
+
+het.df$mean_sus_inv <- 1/het.df$mean_sus
+
+#hawley et al 2024
+het.paper.only <- ggplot(het.df, aes(x=Metric))+
+  geom_point(size=5,aes(x="CV", y=CV, color=dose), shape = 17)+
+  geom_point(size=5,aes(x="CV", y=CV, shape = "CV"), color="black", shape=2, stroke = 1)+
+  scale_color_manual(values=c(pri_colors))+
+  scale_y_continuous(
+    name= "Variability in Susceptibility Hawley et al. 2024"
+  )+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=12, face="bold"),
+    legend.position = "none"
+  ) +
+  labs(color = "Primary Treatment", shape= "Variability Metric")
+het.paper.only
+
+ab.paper.only <- ggplot(het.df, x=Metric)+
+  geom_point(size=5,aes(x="PV", y=ab.pv, color=dose, shape="PV"))+
+  geom_errorbar(aes(ymin=ci_lower_pv, ymax=ci_upper_pv, y=ab.pv, x="PV", color=dose), width=0.1)+
+  geom_point(size=5,aes(x="CV", y=ab.cv, color=dose, shape = "CV"))+
+  geom_errorbar(aes(ymin=ci_lower_cv, ymax=ci_upper_cv, y=ab.cv, x="CV", color=dose), width=0.1)+
+  #geom_point(size=3.6,aes(x="PV", y=ab.pv), color="black", shape=1, stroke = 2)+
+  scale_color_manual(values=c(pri_colors))+
+  scale_y_continuous(
+    name="Variability in Antibody Levels DPPI 41"
+  )+
+  scale_x_discrete(
+    name="Metric"
+  )+
+  scale_shape_manual(values=c(17,19))+
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=12, face = "bold"),
+    legend.position="top",
+    legend.direction = "horizontal",
+    legend.box = "vertical",
+    legend.background= element_rect(size=0.25, linetype="solid"))+
+  labs(color = "Primary Treatment", shape= "Variability Metric")
+ab.paper.only
+
+legend <- cowplot::get_legend(ab.paper.only)
+
+# Remove legends from plots
+het.paper.only <- het.paper.only + theme(legend.position = "none")
+ab.paper.only <- ab.paper.only + theme(legend.position = "none")
+
+#FIGURE 4
+Fig4 <- grid.arrange(legend, 
+             arrangeGrob(het.paper.only, ab.paper.only, ncol = 2),
+             ncol = 1,
+             heights = c(1, 4))
+```
+
+####Variability in Reinfected Birds####
+```{r Secondary Sample Sizes}
+sec.ab <- m.ab %>%
+  filter(inf_sec == 1 & dpi > 41 & secondary_dose == 7000)
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+
+m.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(inf_sec, primary_treatment, secondary_dose, band_number) %>%
+  group_by(inf_sec, secondary_dose, primary_treatment) %>%
+  tbl_summary(
+    by = inf_sec, # Grouping by infected secondary
+    statistic = list(band_number ~ "{n} ({p}%)") # Count occurrences and show percentages
+  ) %>%
+  modify_header(label ~ "**Infected Secondary**") 
+
+sec.ab %>%
+  filter(dpi == 56) %>%
+  dplyr::select(dpi, primary_treatment, secondary_dose, inf_sec) %>%
+  group_by(secondary_dose, primary_treatment) %>%
+  tbl_summary()%>%
+  modify_header(
+    label ~ "**By Primary and Secondary Dose**"
+  )
+```
+
+```{r Max quantity and eye score secondary}
+max.quant.sec <- sec.ab %>%
+  filter(dpi > 41 & inf_sec ==1) %>%
+  group_by(band_number, primary_treatment, secondary_dose) %>%
+  reframe(max_quantity = max(quantity1, na.rm = TRUE))
+
+max.tes.sec <- sec.ab %>%
+  group_by(band_number, primary_treatment, secondary_dose)%>%
+  reframe(max_tes = max(tes, na.rm=TRUE))
+
+max.sec<-left_join(max.quant.sec, max.tes.sec, by="band_number")
+
+max.sec$primary_treatment <- max.sec$primary_treatment.x
+max.sec$secondary_dose <- max.sec$secondary_dose.x
+
+max.sec <- max.sec %>%
+  dplyr::select(-c(primary_treatment.y, secondary_dose.y, primary_treatment.x, secondary_dose.x))
+max.sec$max_quantity1 <- max.sec$max_quantity+1
+
+```
+
+```{r}
+# Pipeline to calculate CV, PV, V2, and their 95% confidence intervals for max_quantity and max_tes
+
+#add small constant for variability calculations
+sec.var$max_tes <- sec.var$max_tes + 0.001
+
+sec.var <- max.sec %>%
+  group_by(primary_treatment) %>%
+  drop_na(max_quantity, max_tes) %>%
+  dplyr::reframe(
+    # For max_quantity
+    max_quantity = max_quantity,
+    mean_quantity = mean(max_quantity),
+    median_quantity = median(max_quantity),
+    bird_sd_quantity = sd(max_quantity),
+    band_number = band_number,
+    bird_cv_quantity = calculate_cv(max_quantity),  # Calculate CV for max_quantity
+    bird_pv_quantity = calculate_pv(max_quantity),  # Calculate PV for max_quantity
+    bird_v2_quantity = calculate_v2(max_quantity),  # Calculate V2 for max_quantity
+    
+    # Bootstrap for each metric for max_quantity
+    cv_bootstrap_quantity = list(replicate(n_boot, calculate_cv(sample(max_quantity, replace = TRUE)))),
+    pv_bootstrap_quantity = list(replicate(n_boot, calculate_pv(sample(max_quantity, replace = TRUE)))),
+    v2_bootstrap_quantity = list(replicate(n_boot, calculate_v2(sample(max_quantity, replace = TRUE)))),
+
+    # For max_tes
+    max_tes = max_tes,
+    mean_tes = mean(max_tes),
+    median_tes = median(max_tes),
+    bird_sd_tes = sd(max_tes),
+    bird_cv_tes = calculate_cv(max_tes),  # Calculate CV for max_tes
+    bird_pv_tes = calculate_pv(max_tes),  # Calculate PV for max_tes
+    bird_v2_tes = calculate_v2(max_tes),  # Calculate V2 for max_tes
+    
+    # Bootstrap for each metric for max_tes
+    cv_bootstrap_tes = list(replicate(n_boot, calculate_cv(sample(max_tes, replace = TRUE)))),
+    pv_bootstrap_tes = list(replicate(n_boot, calculate_pv(sample(max_tes, replace = TRUE)))),
+    v2_bootstrap_tes = list(replicate(n_boot, calculate_v2(sample(max_tes, replace = TRUE))))
+  ) %>%
+  # Calculate 95% confidence intervals for CV, PV, and V2 for both max_quantity and max_tes
+  mutate(
+    # For max_quantity
+    cv_lower_ci_quantity = map_dbl(cv_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci_quantity = map_dbl(cv_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci_quantity = map_dbl(pv_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci_quantity = map_dbl(pv_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci_quantity = map_dbl(v2_bootstrap_quantity, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci_quantity = map_dbl(v2_bootstrap_quantity, ~ quantile(.x, 0.975, na.rm = TRUE)),
+
+    # For max_tes
+    cv_lower_ci_tes = map_dbl(cv_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    cv_upper_ci_tes = map_dbl(cv_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    pv_lower_ci_tes = map_dbl(pv_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    pv_upper_ci_tes = map_dbl(pv_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE)),
+    v2_lower_ci_tes = map_dbl(v2_bootstrap_tes, ~ quantile(.x, 0.025, na.rm = TRUE)),
+    v2_upper_ci_tes = map_dbl(v2_bootstrap_tes, ~ quantile(.x, 0.975, na.rm = TRUE))
+  ) %>%
+  # Optionally, remove the bootstrap columns to clean up the dataset
+  select(-cv_bootstrap_quantity, -pv_bootstrap_quantity, -v2_bootstrap_quantity,
+         -cv_bootstrap_tes, -pv_bootstrap_tes, -v2_bootstrap_tes) %>%
+  ungroup()
+
+# Merge back with the original dataset and cleanup
+max.sec.v <- left_join(max.sec, sec.var, by = c("primary_treatment", "band_number"))
+
+# Summarize and print the final table
+summary_tibble <- sec.var %>%
+  group_by(primary_treatment) %>%
+  summarize(
+    mean_bird_cv_quantity = mean(bird_cv_quantity, na.rm = TRUE),   # Mean CV for max_quantity
+    mean_bird_sd_quantity = mean(bird_sd_quantity, na.rm = TRUE),   # Mean SD for max_quantity
+    mean_bird_pv_quantity = mean(bird_pv_quantity, na.rm = TRUE),   # Mean PV for max_quantity
+    mean_bird_v2_quantity = mean(bird_v2_quantity, na.rm = TRUE),
+    
+    mean_bird_cv_tes = mean(bird_cv_tes, na.rm = TRUE),             # Mean CV for max_tes
+    mean_bird_sd_tes = mean(bird_sd_tes, na.rm = TRUE),             # Mean SD for max_tes
+    mean_bird_pv_tes = mean(bird_pv_tes, na.rm = TRUE),             # Mean PV for max_tes
+    mean_bird_v2_tes = mean(bird_v2_tes, na.rm = TRUE),
+    
+    avg_max_quantity = mean(max_quantity, na.rm = TRUE),            # Average max_quantity for each group
+    median_max_quantity = median(max_quantity, na.rm=TRUE),
+    avg_max_tes = mean(max_tes, na.rm = TRUE),                      # Average max_tes for each group
+    median_max_tes = median(max_tes, na.rm=TRUE),
+    n_individuals = n_distinct(band_number)                         # Number of individuals in each group
+  ) %>%
+  as_tibble()
+
+# Print the summary table
+print(summary_tibble)
+
+```
+
+```{r Maximum Pathogen Load and Variability}
+ggplot(summary_tibble)+
+  geom_point(aes(x="CV", y= mean_bird_cv_quantity, color=primary_treatment))+
+  geom_point(aes(x="PV", y= mean_bird_pv_quantity, color=primary_treatment))+
+  geom_point(aes(x="V2", y= mean_bird_v2_quantity, color=primary_treatment))+
+    scale_color_manual(values=c(pri_colors))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 17, "PV" = 19, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  labs(title="Secondary Pathogen Load Variability", y="Variability", x="Metric")
+
+ggplot(max.sec.v)+
+  geom_point(aes(x="CV", y= bird_cv_quantity, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="CV", ymin=cv_lower_ci_quantity, ymax=cv_upper_ci_quantity, y=bird_cv_quantity, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+  geom_point(aes(x="PV", y= bird_pv_quantity, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="PV", ymin=pv_lower_ci_quantity, ymax=pv_upper_ci_quantity, y=bird_pv_quantity, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+  geom_point(aes(x="V2", y= bird_v2_quantity, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="V2", ymin=v2_lower_ci_quantity, ymax=v2_upper_ci_quantity, y=bird_v2_quantity, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+    scale_color_manual(values=c(pri_colors))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 17, "PV" = 19, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  labs(title="Secondary Pathogen Load Variability", y="Variability", x="Metric", color="Primary Treatment")
+
+ggplot()+
+  geom_jitter(data=sec.var, aes(x=primary_treatment, y=max_quantity, color=primary_treatment), width=0.05, size=2, alpha=0.5)+
+  geom_point(data=summary_tibble, aes(x=primary_treatment, y=median_max_quantity, color=primary_treatment), shape=18, size=3)+
+  geom_point(data=summary_tibble, aes(x=primary_treatment, y=avg_max_quantity, color=primary_treatment), shape=17, size=3)+
+  scale_color_manual(values=c(pri_colors))+
+  labs(y="Max Pathogen Load", x="Primary Treatment", color="Primary Treatment", title = "Maximum Pathogen Load of Reinfected Birds")
+```
+
+```{r}
+ggplot(summary_tibble)+
+  geom_point(aes(x="CV", y= mean_bird_cv_tes, color=primary_treatment))+
+  geom_point(aes(x="PV", y= mean_bird_pv_tes, color=primary_treatment))+
+  geom_point(aes(x="V2", y= mean_bird_v2_tes, color=primary_treatment))+
+    scale_color_manual(values=c(pri_colors))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 17, "PV" = 19, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  labs(title="Secondary Eye Score Variability", y="Variability", x="Metric")
+
+ggplot(max.sec.v)+
+  geom_point(aes(x="CV", y= bird_cv_tes, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="CV", ymin=cv_lower_ci_tes, ymax=cv_upper_ci_tes, y=bird_cv_tes, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+  geom_point(aes(x="PV", y= bird_pv_tes, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="PV", ymin=pv_lower_ci_tes, ymax=pv_upper_ci_tes, y=bird_pv_tes, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+  geom_point(aes(x="V2", y= bird_v2_tes, color=primary_treatment), position=position_dodge(width=0.5))+
+  geom_errorbar(aes(x="V2", ymin=v2_lower_ci_tes, ymax=v2_upper_ci_tes, y=bird_v2_tes, color=primary_treatment), width=0.2, position=position_dodge(width=0.5))+
+    scale_color_manual(values=c(pri_colors))+
+  scale_shape_manual(name = "Variability Metric",
+                     values = c("CV" = 17, "PV" = 19, "V2" = 18),  # Assign shapes
+                     labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV^2")) +
+  labs(title="Secondary Eye Score Variability", y="Variability", x="Metric", color="Primary Treatment")
+
+ggplot()+
+  geom_jitter(data=sec.var, aes(x=primary_treatment, y=max_tes, color=primary_treatment), width=0.1, height=0, size=2, alpha=0.5)+
+  geom_point(data=summary_tibble, aes(x=primary_treatment, y=avg_max_tes, color=primary_treatment), shape=17, size=3)+
+  scale_color_manual(values=c(pri_colors))+
+  labs(y="Max Eye Score", x="Primary Treatment", color="Primary Treatment", title = "Maximum Eye Score of Reinfected Birds")
+```
+
