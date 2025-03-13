@@ -1,0 +1,17 @@
+"population","primary_dose","N","infected","experiment","secondary_dose"
+"va",0,50,23,"primary",750
+"va",0,3,0,"secondary",0
+"va",0,12,1,"secondary",30
+"va",0,12,1,"secondary",100
+"va",0,11,2,"secondary",300
+"va",0,12,12,"secondary",7000
+"va",750,4,0,"secondary",0
+"va",750,11,0,"secondary",30
+"va",750,12,1,"secondary",100
+"va",750,11,2,"secondary",300
+"va",750,12,6,"secondary",7000
+"va",30000,6,0,"secondary",0
+"va",30000,11,0,"secondary",30
+"va",30000,12,1,"secondary",100
+"va",30000,11,1,"secondary",300
+"va",30000,10,2,"secondary",7000

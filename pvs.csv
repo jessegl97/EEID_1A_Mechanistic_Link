@@ -1,0 +1,11 @@
+﻿period,treat,Metric,cv,sd,pv
+Primary,High,Eyescore,0.778,1.72,0.55
+Primary,Low,Eyescore,0.87,0.941,0.608
+Primary,High,Pathogen load,0.873,70729,0.52
+Primary,Low,Pathogen load,1.76,70514,0.794
+Secondary,High,Pathogen load,0.541,51.6,0.553
+Secondary,Low,Pathogen load,1.01,118558,0.632
+Secondary,Sham,Pathogen load,0.816,87110,0.548
+Secondary,High,Eyescore,0,0,0
+Secondary,Low,Eyescore,0.843,1.26,0.695
+Secondary,Sham,Eyescore,0.621,1.55,0.471

@@ -1,0 +1,36 @@
+ Family: Gamma  ( log )
+Formula:          elisa_od ~ primary_treatment * dpi.f + (1 | band_number)
+Dispersion:                ~dpi.f
+Data: p.abt
+
+     AIC      BIC   logLik deviance df.resid 
+ -2957.4  -2904.8   1491.7  -2983.4      409 
+
+Random effects:
+
+Conditional model:
+ Groups      Name        Variance Std.Dev.
+ band_number (Intercept) 0.00246  0.0496  
+Number of obs: 422, groups:  band_number, 146
+
+Conditional model:
+                               Estimate Std. Error z value Pr(>|z|)    
+(Intercept)                   -3.076923   0.009307  -330.6  < 2e-16 ***
+primary_treatmentLow           0.013363   0.012894     1.0    0.300    
+primary_treatmentHigh          0.005257   0.012893     0.4    0.683    
+dpi.f14                       -0.044061   0.047249    -0.9    0.351    
+dpi.f41                       -0.021636   0.022956    -0.9    0.346    
+primary_treatmentLow:dpi.f14   0.281946   0.060807     4.6 3.54e-06 ***
+primary_treatmentHigh:dpi.f14  0.767971   0.060553    12.7  < 2e-16 ***
+primary_treatmentLow:dpi.f41   0.043640   0.031957     1.4    0.172    
+primary_treatmentHigh:dpi.f41  0.240128   0.031818     7.5 4.46e-14 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Dispersion model:
+            Estimate Std. Error z value Pr(>|z|)    
+(Intercept)   6.4881     0.3853  16.841  < 2e-16 ***
+dpi.f14      -3.8302     0.4097  -9.350  < 2e-16 ***
+dpi.f41      -2.7027     0.4189  -6.452  1.1e-10 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
