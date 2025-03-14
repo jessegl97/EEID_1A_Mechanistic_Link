@@ -954,22 +954,58 @@ Fig3 <- sus_14_raw / sus_41_raw
 #         plot=Fig3, width=10, height=5, dpi = 300)
 
 ####Variability With Hawley et al., 2024####
-#extract variability metrics from summary_tibble_priming_ab a.cv calculatons
+#extract variability metrics from summary_tibble_priming_ab a.cv calculations
 summary_tibble_priming_ab %>% filter(dpi.f == 41)
 
+source("CIs_Sus_2024.R")
+
+
+# Existing dose categories
 dose <- c("Sham", "Low", "High")
-CV <- as.numeric(c(0.899, 1.630, 2.511)) #Susceptibility CV Hawley et al., 2024 (p5)
+
+# Reported CV values from Hawley et al. (2024)
+CV <- as.numeric(c(0.899, 1.630, 2.511))  # Susceptibility CV from prior study
+
+# Antibody prevalence values
 ab.pv <- as.numeric(c(0.0592, 0.126, 0.187))
+
+# Antibody CV values
 ab.cv <- as.numeric(c(0.0710, 0.153, 0.261))
+
+# Previously reported CI for antibody CV
 ci_lower_cv <- as.numeric(c(0.0377, 0.106, 0.170))
-ci_upper_cv <- as.numeric(c(0.09970471, 0.18774258, 0.33572240))
-ci_lower_pv <- as.numeric(c(0.04002442, 0.09085289, 0.14255949))
-ci_upper_pv <- as.numeric(c(0.07988264, 0.15355463, 0.22592119))
+ci_upper_cv <- as.numeric(c(0.0997, 0.1877, 0.3357))
+
+# Previously reported CI for antibody prevalence
+ci_lower_pv <- as.numeric(c(0.0400, 0.0909, 0.1426))
+ci_upper_pv <- as.numeric(c(0.0799, 0.1536, 0.2259))
+
+# Mean susceptibility and antibody responses
 mean_sus <- as.numeric(c(1.181, 0.446, 0.192))
-mean_ab <- as.numeric(c(0.04506522, 0.04812000, 0.05767925))
+mean_ab <- as.numeric(c(0.0451, 0.0481, 0.0577))
+
+# Time point (Days Post Infection)
 dpi <- 41
 
-het.df <- data.frame(dose, CV, mean_sus, ab.pv, ab.cv, dpi, mean_ab, ci_lower_cv, ci_upper_cv, ci_lower_pv, ci_upper_pv)
+# Combine all into a data frame
+het.df <- data.frame(
+  dose = dose,
+  CV_Hawley2024 = CV,  # Published susceptibility CV
+  CV_Hawley2024_calc = CoV_calc, #Verified susceptibility CV from CIs_Sus_2024.R
+  mean_CV_boot = cv_summary$mean_CV,  # Bootstrapped mean CV
+  ci_lower_boot = ci_lower_boot,  # Bootstrapped lower CI for CV
+  ci_upper_boot = ci_upper_boot,  # Bootstrapped upper CI for CV
+  ab_pv = ab.pv,  # Antibody prevalence
+  ab_cv = ab.cv,  # Antibody CV
+  ci_lower_cv = ci_lower_cv,  # Published lower CI for ab_cv
+  ci_upper_cv = ci_upper_cv,  # Published upper CI for ab_cv
+  ci_lower_pv = ci_lower_pv,  # Published lower CI for ab_pv
+  ci_upper_pv = ci_upper_pv,  # Published upper CI for ab_pv
+  mean_sus = mean_sus,  # Mean susceptibility
+  mean_ab = mean_ab,  # Mean antibody response
+  dpi = dpi  # Days post-infection
+)
+
 
 #hawley et al 2024
 het.paper.only <- ggplot(het.df, aes(x=Metric))+
@@ -1016,59 +1052,57 @@ ab.paper.only
 het.paper.only <- het.paper.only + theme(legend.position = "none")
 ab.paper.only <- ab.paper.only + theme(legend.position = "right")
 
-#Figure 4
+#Old Figure 4
 het.paper.only + ab.paper.only
 
 
-####Multilevel hierarchical modeling: Are antibody levels dppi 41 correlated with heterogeneity in susceptibility?
-mlm41 <- wibird41 %>% 
-  dplyr::select(band_number, primary_treatment, sex, elisa_od_41)
-
-mlm41$primary_treatment <- as.factor(mlm41$primary_treatment)
-
-het.df$primary_treatment <- as.factor(het.df$dose)
-het.df$primary_treatment <- factor(het.df$primary_treatment)
-
-mlm <- merge(mlm41, het.df, by="primary_treatment", all.x=TRUE)
-mlm$sus_cv <- mlm$CV
-
-#model: antibody levels predictor primary_treatment is radom effect as each group has one CV value.
-hmod <- lm(sus_cv ~ elisa_od_41, data= mlm)
-plot(allEffects(hmod))
-
-ggplot(mlm, aes(x=sus_cv, y=elisa_od_41, color=primary_treatment))+
-  geom_point()
-
-#simple model - is heterogeneity in susceptibility correlated with antibody variability dppi 41?
-mod_group <- lm(sus_cv ~ ab.pv + primary_treatment, data=mlm)
-summary(mod_group)
-plot(allEffects(mod_group))
-
-ggplot(mlm, aes(x=sus_cv, y=ab.pv, color=primary_treatment))+
-  geom_point()
-
-ggplot(het.df, aes(x = ab.pv, y = CV, color=primary_treatment)) +
+#Figure 4
+ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
   geom_point(size = 4) +
-  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab.pv), width=0.01)+
-  #geom_point(aes(x=ab.cv, y=CV, color=primary_treatment), size=2, alpha=0.5)+
-  #geom_errorbar(aes(xmin = ci_lower_cv, xmax= ci_upper_cv, x=ab.cv), width=0.01, lty="dashed")+
-  #geom_errorbar(aes(ymin = ))
+  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab.pv), width=0)+
+  geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
   #geom_text(aes(label = primary_treatment), vjust = -1) +
   scale_color_manual(values=pri_colors)+
   labs(x = "Antibody Variability (PV)", 
        y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
-       title = "Comparison of Variability in Antibodies and Susceptibility",
+       #title = "Comparison of Variability in Antibodies and Susceptibility",
        color="Primary Treatment") +
-  theme_minimal()
+  theme_minimal()+
+  theme(
+    axis.title.y = element_text(color = "black", size=15, face = "bold"),
+    axis.title.x = element_text(color = "black", size=15, face = "bold"),
+    legend.position="right",
+    legend.direction = "vertical",
+    legend.box = "vertical",
+    legend.background= element_rect(size=0.25, linetype="solid"))
 
-ggplot(het.df, aes(x = ab.pv, y = ab.cv, color=primary_treatment)) +
+#Figure 4 alt: CV
+ggplot(het.df, aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
   geom_point(size = 4) +
-  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab.pv), width=0.001)+
-  geom_errorbar(aes(ymin = ci_lower_cv, ymax= ci_upper_cv, y=ab.cv), width=0.001)+
+  geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
+  geom_errorbar(aes(xmin = ci_lower_cv, xmax= ci_upper_cv, x=ab.cv), width=0)+
   #geom_errorbar(aes(ymin = ))
   #geom_text(aes(label = primary_treatment), vjust = -1) +
-  labs(x = "Antibody Variability (PV)", 
-       y = "Antibody Variability (CV)", 
+  labs(x = "Antibody Variability (CV)", 
+       y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
+       color = "Primary Treatment") +
+  scale_color_manual(values=c(pri_colors))+
+  theme_minimal()
+
+ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
+ 
+  #PV
+  geom_point(size = 4) +
+  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab.pv), width=0)+
+  geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
+  
+  #CV
+  geom_point(aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(primary_treatment)), size = 4, alpha=0.25) +
+   geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024, x=ab.cv), width= 0.01, lty="dashed", alpha=0.5, color="black")+
+   geom_errorbar(aes(xmin = ci_lower_cv, xmax= ci_upper_cv, x=ab.cv, y = CV_Hawley2024), width=0.1, lty="dashed", alpha=0.5, color="black")+
+  
+  labs(x = "Antibody Variability (PV, CV)", 
+       y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
        title = "Comparison of Variability in Antibodies",
        color = "Primary Treatment") +
   scale_color_manual(values=c(pri_colors))+
