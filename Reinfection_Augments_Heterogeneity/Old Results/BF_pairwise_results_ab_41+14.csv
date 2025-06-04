@@ -1,0 +1,4 @@
+group1,group2,F_value,p_value,p_adj
+High,Sham,32.2,2.00E-07,5.99E-07
+High,Low,2.22,0.139,0.139
+Sham,Low,16.5,0.000113,0.00017

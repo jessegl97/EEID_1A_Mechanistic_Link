@@ -24,8 +24,10 @@ library(car)
 library(VGAM)
 library(writexl)
 library(dunn.test)
+library(ggh4x)
 
 #import data
+#m.ab <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Final Dataframes/reinfection_response.csv")
 source("dataCleaning_EEID1A.R")
 
 #DFs: 
@@ -86,6 +88,7 @@ p.ab.missing <- p.ab %>%
   filter(dpi %in% c(-8, 14, 41) & is.na(elisa_od)) %>%
   dplyr::select(band_number, dpi, primary_treatment, secondary_dose, elisa_od)
 
+
 p.ab %>%
   dplyr::select(dpi, primary_treatment, secondary_dose)%>%
   tbl_summary(
@@ -121,9 +124,6 @@ p.ab %>%
 lm0 <- glmmTMB(elisa_od~primary_treatment, data=p.ab %>% filter(dpi == '-8'), family=Gamma())
 summary(lm0)
 simulateResiduals(lm0, plot=T)
-
-emm_r <- emmeans(lm0, ~primary_treatment)
-pairs(emm_r)
 
 #Do antibody levels differ across sampling days and treatment?
 #I treat days post inoculation as a factor in these models and use band_number as a random effect
@@ -184,19 +184,6 @@ aictab(cand.set=list(p2, p2d, p2dd), modnames=c("p2", "p2d", "p2dd"))
 # p6   5 -2531.83     498.83   0.00   1.00 1270.98
 
 #model comparison VGAM
-# drop1(p1, test="Chisq") #primary_treatment and dpi.f contribute uniquely to explaining variation
-# 
-# drop1(p2, test="Chisq") #The interaction between primary_treatment and dpi.f > the effect of primary treatment
-#                         #on the outcome varies significantly by dpi levels
-# 
-# drop1(p3, test="Chisq") # sex is not significant
-# 
-# drop1(p4, test="Chisq") # sex is not significant but interaction b/t primary_treatment and dpi.f is better
-# 
-# drop1(p5, test="Chisq") # primary_treatment*sex is not significant
-# 
-# drop1(p6, test="Chisq") # better with primary_treatment
-
 drop1(p1d, test="Chisq") #primary_treatment and dpi.f contribute uniquely to explaining variation
 
 drop1(p2d, test="Chisq") #The interaction between primary_treatment and dpi.f > the effect of primary treatment
@@ -211,7 +198,7 @@ drop1(p5d, test="Chisq") # primary_treatment*sex is not significant
 drop1(p6d, test="Chisq") # better with primary_treatment
 
 #make Sham the reference category
-p.abt$primary_treatment <- relevel(p.abt$primary_treatment, ref = "Sham")
+#p.abt$primary_treatment <- relevel(p.abt$primary_treatment, ref = "Sham")
 
 hist(log(p.abt$elisa_od))
 
@@ -219,7 +206,7 @@ hist(log(p.abt$elisa_od))
   #Dispersion formula to account for gamma model allowing dispersion parameter to vary by dpi and primary treatment
     #In gamma models, the variance is proportional to the squared mean
 lm1 <- glmmTMB(elisa_od~ primary_treatment*dpi.f + (1|band_number),
-                          dispformula = ~dpi.f*primary_treatment, 
+                          dispformula = ~\primary_treatment*dpi.f, 
                           family=Gamma(link="log"),
                           data=p.abt)
 
@@ -246,7 +233,7 @@ dispersion_effects <- data.frame(
   row.names = NULL
 )
 random_effects <- tidy(lm1, effects = "ran_pars")  # Extract random effects
-
+fixed_effects <- tidy(lm1, effects = "fixed") #Extract fixed effects
 
 
 #Post-Hoc Tukey
@@ -299,14 +286,14 @@ fig2.raw<-ggplot(data = p.abt, aes(x = dpi.f, y = elisa_od, color = primary_trea
   geom_path(data = dat.new, aes(x = dpi.f, y = yhat, group = primary_treatment,
                                 color = primary_treatment), alpha=0.75) +
   geom_errorbar(data = dat.new, aes(ymin = Lower, ymax = Upper, x = dpi.f, y = yhat),
-                color = "black", width = 0.01) +
+                color = "black", width = 0.025) +
   geom_point(data = dat.new, aes(x = dpi.f, y = yhat, color = primary_treatment),
              size = 2, alpha = 0.75, shape = 16) +
   geom_point(data = dat.new, aes(x = dpi.f, y = yhat),
-             color = "black", size = 2, alpha = 1, shape = 1, stroke = 0.1) +
+             color = "black", size = 2, alpha = 0.5, shape = 1, stroke = 0.1) +
   
   # Labels and axis
-  labs(y = "Anti-MG IgY Antibody Levels [OD]", 
+  labs(y = "Anti-MG IgY Antibody Levels (OD)", 
        x = "Days Post Primary Inoculation", 
        shape = "Variability Metric", 
        color = "Primary Treatment", 
@@ -315,7 +302,8 @@ fig2.raw<-ggplot(data = p.abt, aes(x = dpi.f, y = elisa_od, color = primary_trea
   # Custom color and fill scales
   scale_color_manual(values = c(pri_colors)) +
   scale_fill_manual(values = c(pri_colors)) +
-  
+  coord_cartesian(ylim=c(0.03,0.2))+
+  scale_y_continuous(breaks=c(0.025, 0.05, 0.075, 0.10, 0.125, 0.15, 0.175, 0.2))+
   # Theme settings
   theme_bw() +
   theme(
@@ -329,82 +317,6 @@ fig2.raw<-ggplot(data = p.abt, aes(x = dpi.f, y = elisa_od, color = primary_trea
   )
 
 fig2.raw
-
-
-#Bayesian Gamma Model
-# install.packages("brms")
-# library(brms)
-
-#Model antibody levels as Gamma-distributed with mean predicted by primary treatment * dpi.f with dispersion modeled explicitly by dpi.f
-gamma_model <- readRDS("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Models/gamma_model.rds")
-# gamma_model <- brm(
-#   bf(elisa_od ~ primary_treatment * dpi.f + (1|band_number),
-#      shape ~ dpi.f),
-#   family = Gamma(link="log"),
-#   data = p.abt,
-#   chains=4, cores=4,
-#   iter=6000, warmup=2000,
-#   control=list(adapt_delta=0.999, max_treedepth=20),
-#   prior = c(
-#     prior(normal(-3, 1), class="Intercept"), # baseline around log(0.05) ≈ -3, SD=1
-#     prior(normal(0, 1), class="b"),          # differences among groups around 0, SD=1
-#     prior(exponential(1), class="sd"),       # positive, not too large random effect
-#     prior(normal(0, 1), dpar="shape")        # mild prior for shape (dispersion)
-#   ),
-#   save_pars = save_pars(all = TRUE)
-# )
-
-#save model
-#saveRDS(gamma_model, file = "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Models/gamma_model.rds")
-summary_output <- summary(gamma_model)
-#capture.output(summary_output, file = "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/bayes_ab_gamma_model_summary.txt")
-
-# Check convergence diagnostics:
-plot(gamma_model)
-
-# Check posterior predictive checks:
-pp_check(gamma_model)
-
-
-# Posterior predictive checks
-pp_check(gamma_model)
-
-summary(gamma_model)
-
-#loo_gamma<-loo(gamma_model, moment_match = TRUE, reloo = TRUE)
-#saveRDS(loo_gamma, file = "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Models/loo_gamma.rds")
-#capture.output(print(loo_gamma), file = "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/loo_gamma_summary.txt")
-loo_gamma <- readRDS("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Models/loo_gamma.rds")
-
-loo_gamma
-AIC(lm1)
-
-#LOOIC = -3035.2, AIC = -3183.5
-
-#install.packages("tidybayes")
-library(tidybayes)
-
-# Generate posterior predictions
-preds <- conditional_effects(gamma_model, effects = "dpi.f:primary_treatment", method = "posterior_epred")
-
-# Convert to dataframe
-pred_df <- as.data.frame(preds$`dpi.f:primary_treatment`)
-
-# Plot predicted antibody levels over dpi and treatments
-ggplot(pred_df, aes(x = dpi.f, y = estimate__, color = primary_treatment, group = primary_treatment)) +
-  geom_jitter(data = p.abt, aes(x = dpi.f, y = elisa_od, color = primary_treatment),
-              size = 1.5, alpha = 0.5, width = 0.15, height = 0, shape=16) +
-  geom_line(size = 1) +
-  geom_ribbon(aes(ymin = lower__, ymax = upper__), alpha = 0.05, lty="dashed") +
-  theme_minimal() +
-  scale_color_manual(values=c(pri_colors))+
-  labs(
-    title = "Predicted ELISA OD by dpi and Treatment",
-    x = "Days Post Infection (dpi)",
-    y = "Predicted ELISA OD",
-    color = "Treatment"
-  )
-
 
 ####Variability in Antibody Levels across primary####
 #add small constant to total eye score for calculation of variability
@@ -579,7 +491,7 @@ fig2.comb <- ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary
 fig2.comb
 
 #Figure 2 var only
-fig2.pv<-ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_treatment)) +
+fig2.var<-ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_treatment)) +
   # Original jittered data points for elisa_od
   #geom_jitter(aes(shape=primary_treatment), size = 1.5, alpha = 1, width = 0.15, height = 0) +
   
@@ -632,7 +544,84 @@ fig2.pv<-ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_tre
     legend.direction = "horizontal"
   )
 
+fig2.var
+
+
+#Figure 2 var only
+fig2.pv<-ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_treatment)) +
+  # Original jittered data points for elisa_od
+  #geom_jitter(aes(shape=primary_treatment), size = 1.5, alpha = 1, width = 0.15, height = 0) +
+  
+  # PV
+  geom_point(data = summary_tibble_priming_ab, aes(x = dpi.f, y = PV, fill = primary_treatment), shape=17,
+             size = 3, alpha = 1) +
+  geom_errorbar(data = summary_tibble_priming_ab, aes(x = dpi.f, ymin = lower_ci_pv, ymax = upper_ci_pv,
+                                                      group = primary_treatment, color = primary_treatment),
+                width = 0.05, alpha = 0.75) +
+  geom_path(data = summary_tibble_priming_ab, aes(x = dpi.f, y = PV, color = primary_treatment,
+                                                  group = primary_treatment), lty = "solid", alpha=0.75) +
+  
+
+  # Labels and axis
+  labs(y = "Variability in IgY Antibody Levels (PV)", 
+       x = "Days Post Primary Inoculation", 
+       color = "Primary Treatment", 
+       fill = "Primary Treatment") +
+  
+  # Custom color and fill scales
+  scale_color_manual(values = c(pri_colors)) +
+  scale_fill_manual(values = c(pri_colors)) +
+  coord_cartesian(ylim=c(0,0.31))+
+  
+  # Theme settings
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(color = "black", size = 15, face = "bold"),
+    axis.text.y = element_text(color = "black", face = "bold", size = 15),
+    axis.text.y.right = element_text(color = "black", face = "bold", size = 15),
+    axis.title.y.right = element_text(color = "black", size = 20, face = "bold"),
+    axis.title.x = element_text(size = 20),
+    axis.text.x = element_text(size = 15),
+    legend.background = element_rect(size = 0.25, linetype = "solid"),
+    legend.position = "top",
+    legend.direction = "horizontal"
+  )
+
 fig2.pv
+
+fig2 <- fig2.raw + fig2.pv
+fig2
+
+# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Figures/Fig2.png",
+#       plot=fig2, width=9, height=6, dpi = 300)
+
+#Brown-Forsythe
+leveneTest(elisa_od ~ primary_treatment, data = p.aba %>% filter(dpi.f == 14), center = median)
+leveneTest(elisa_od ~ interaction(primary_treatment, dpi.f), data = p.aba, center = median)
+
+p.aba %>%
+  group_by(primary_treatment, dpi.f) %>%
+  mutate(dev_from_med = abs(elisa_od - median(elisa_od))) %>%
+  ggplot(aes(x = interaction(primary_treatment, dpi.f), y = dev_from_med)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "Treatment x DPI", y = "|Deviation from Median ELISA OD|")
+
+dat <- p.aba %>% filter(dpi.f == 41)
+
+# Get all pairwise combinations of groups
+pairwise_results_ab_41 <- combn(unique(dat$primary_treatment), 2, simplify = FALSE) %>%
+  map_df(~{
+    subdat <- dat %>% filter(primary_treatment %in% .x)
+    test <- leveneTest(elisa_od ~ primary_treatment, data = subdat, center = median)
+    tibble(
+      group1 = .x[1],
+      group2 = .x[2],
+      F_value = test[1, "F value"],
+      p_value = test[1, "Pr(>F)"]
+    )
+  }) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
 
 ####Do Individual Differences in Antibody Levels Predict Secondary Susceptibility####
 ####Analysis 2) Does individual variation in antibody response to infection predict reinfection probability?
@@ -652,6 +641,7 @@ fig2.pv
 unique(not_recovered$band_number)
 
 #Do not omit 2449 - it did not surpass the 50 copy threshold and therefore is not considered infected
+
 s.ab <- m.ab %>%
   filter(!(band_number %in% c(2274, 2469, 2520, 2494)))
 
@@ -685,11 +675,11 @@ wibird$log10.sec_dose <- as.numeric(wibird$log10.sec_dose)
 wibird$secondary_dose_fct <- factor(wibird$secondary_dose, levels = c(0, 30, 100, 300, 7000))
 
 sec_dose_names <- c(
-  "0" = "0",
-  "1.49" = "30",
-  "2" = "100",
-  "2.48" = "300",
-  "3.85" = "7000"
+  "0" = "0  CCU/mL",
+  "1.49" = "30 CCU/mL",
+  "2" = "100 CCU/mL",
+  "2.48" = "300 CCU/mL",
+  "3.85" = "7000 CCU/mL"
 )
 
 
@@ -820,7 +810,6 @@ mod <- glm.ab14
 dat.new=expand.grid(log10.sec_dose=unique(wibird14$log10.sec_dose),
                     inf_sec=unique(wibird14$inf_sec),
                     elisa_od_14 = unique(wibird14$elisa_od_14))
-# elisa_od_14 = unique(wibird14$elisa_od_14))
 dat.new$yhat=predict(mod, type="response", newdata = dat.new)
 #prediction intervals
 preds = predict(mod, type = "link", newdata = dat.new, se.fit =T)
@@ -845,7 +834,7 @@ sus_14_raw<-ggplot(wibird14, aes(x=(elisa_od_14), y=(inf_sec), color=as.factor(l
   geom_jitter(alpha=0.5, height=0.01, width=0)+
   scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
   scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
-  labs(y= "Reinfection Status", color="Secondary Dose", fill ="Secondary Dose")+
+  labs(y= "Reinfection Status", color="Secondary Dose (CCU/mL)", fill ="Secondary Dose (CCU/mL)")+
   scale_x_continuous(labels = scales::number_format(accuracy = 0.01))+
   theme(axis.title.x=element_blank())+
   facet_grid(~dpi~log10.sec_dose, labeller = as_labeller(c(dpi_names14,sec_dose_names)))
@@ -929,7 +918,7 @@ sus_41_raw<-ggplot(wibird41, aes(x=(elisa_od_41), y=(inf_sec), color=as.factor(l
   geom_ribbon(data = dat.new, aes(ymin=Lower, ymax = Upper, x= elisa_od_41, y=yhat, fill=as.factor(log10.sec_dose)), alpha = 0.05, linetype="dashed", size=0.1) +
   scale_color_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
   scale_fill_manual(values = c(sec_colors), labels=c("0", "30", "100", "300", "7000"))+
-  labs(x="IgY Antibody Levels [OD]", y= "Reinfection Status", color="Secondary Dose", fill ="Secondary Dose")+
+  labs(x="IgY Antibody Levels [OD]", y= "Reinfection Status", color="Secondary Dose (CCU/mL)", fill ="Secondary Dose (CCU/mL)")+
   scale_x_continuous(labels = scales::number_format(accuracy = 0.01))+
   facet_grid(~dpi~log10.sec_dose, labeller = as_labeller(c(dpi_names41,sec_dose_names)))
 sus_41_raw
@@ -939,7 +928,8 @@ sus_41_raw
 aictab(cand.set=list(glm.ab.pre, glm.ab14, glm.ab41), modnames=c("glm.ab.pre","glm.ab14", "glm.ab41"))
 
 
-#ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Figures/sus_ab_14.png",
+
+# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Figures/sus_ab_14.png",
 #       plot=sus_ab_14, width=8, height=4, dpi = 300)
 
 
@@ -1006,64 +996,15 @@ het.df <- data.frame(
   dpi = dpi  # Days post-infection
 )
 
-
-#hawley et al 2024
-het.paper.only <- ggplot(het.df, aes(x=Metric))+
-  geom_point(size=5,aes(x="CV", y=CV, color=fct_rev(dose)), shape = 17)+
-  geom_point(size=5,aes(x="CV", y=CV, shape = "CV"), color="black", shape=2, stroke = 1)+
-  scale_color_manual(values=c(pri_colors))+
-  scale_y_continuous(
-    name= "Variability in Susceptibility Hawley et al. 2024"
-  )+
-  theme_minimal()+
-  theme(
-    axis.title.y = element_text(color = "black", size=12, face="bold"),
-    legend.position = "none"
-  ) +
-  labs(color = "Primary Treatment", shape= "Variability Metric")
-het.paper.only
-
-ab.paper.only <- ggplot(het.df, x=Metric)+
-  geom_point(size=5,aes(x="PV", y=ab.pv, color=fct_rev(dose), shape="PV"))+
-  geom_errorbar(aes(ymin=ci_lower_pv, ymax=ci_upper_pv, y=ab.pv, x="PV", color=dose), width=0.05)+
-  geom_point(size=5,aes(x="CV", y=ab.cv, color=dose, shape = "CV"))+
-  geom_errorbar(aes(ymin=ci_lower_cv, ymax=ci_upper_cv, y=ab.cv, x="CV", color=dose), width=0.05)+
-  #geom_point(size=3.6,aes(x="PV", y=ab.pv), color="black", shape=1, stroke = 2)+
-  scale_color_manual(values=c(pri_colors))+
-  scale_y_continuous(
-    name="Variability in Antibody Levels DPPI 41"
-  )+
-  scale_x_discrete(
-    name="Metric"
-  )+
-  scale_shape_manual(values=c(17,19))+
-  theme_minimal()+
-  theme(
-    axis.title.y = element_text(color = "black", size=12, face = "bold"),
-    legend.position="right",
-    legend.direction = "vertical",
-    legend.box = "vertical",
-    legend.background= element_rect(size=0.25, linetype="solid"))+
-  labs(color = "Primary Treatment", shape= "Variability Metric")
-ab.paper.only
-
-
-# Remove legends from plots
-het.paper.only <- het.paper.only + theme(legend.position = "none")
-ab.paper.only <- ab.paper.only + theme(legend.position = "right")
-
-#Old Figure 4
-het.paper.only + ab.paper.only
-
-
 #Figure 4
-ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
+Fig4 <- ggplot(het.df, aes(x = ab_pv, y = CV_Hawley2024, color=fct_rev(dose))) +
   geom_point(size = 4) +
-  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab.pv), width=0)+
+  geom_errorbar(aes(xmin = ci_lower_pv, xmax= ci_upper_pv, x=ab_pv), width=0)+
   geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
   #geom_text(aes(label = primary_treatment), vjust = -1) +
   scale_color_manual(values=pri_colors)+
-  labs(x = "Antibody Variability (PV)", 
+  coord_cartesian(ylim=c(0,4), xlim=(c(0,0.25)))+
+  labs(x = "Variability in IgY Antibody Levels (PV)", 
        y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
        #title = "Comparison of Variability in Antibodies and Susceptibility",
        color="Primary Treatment") +
@@ -1071,13 +1012,19 @@ ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment
   theme(
     axis.title.y = element_text(color = "black", size=15, face = "bold"),
     axis.title.x = element_text(color = "black", size=15, face = "bold"),
+    axis.text = element_text(size = 13, color = "black"), 
+    plot.background = element_rect(fill = "white", color = NA),
     legend.position="right",
     legend.direction = "vertical",
     legend.box = "vertical",
-    legend.background= element_rect(size=0.25, linetype="solid"))
+    legend.background= element_rect(size=0.25, linetype="solid"),
+    legend.title = element_text(face = "bold", size = 10))
+Fig4
+# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Figures/Fig4.png",
+#         plot=Fig4, width=10, height=8, dpi = 300)
 
 #Figure 4 alt: CV
-ggplot(het.df, aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
+ggplot(het.df, aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(dose))) +
   geom_point(size = 4) +
   geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
   geom_errorbar(aes(xmin = ci_lower_cv, xmax= ci_upper_cv, x=ab.cv), width=0)+
@@ -1089,7 +1036,7 @@ ggplot(het.df, aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(primary_treatment
   scale_color_manual(values=c(pri_colors))+
   theme_minimal()
 
-ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment))) +
+ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(dose))) +
  
   #PV
   geom_point(size = 4) +
@@ -1097,7 +1044,7 @@ ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment
   geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024), width= 0)+
   
   #CV
-  geom_point(aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(primary_treatment)), size = 4, alpha=0.25) +
+  geom_point(aes(x = ab.cv, y = CV_Hawley2024, color=fct_rev(dose)), size = 4, alpha=0.25) +
    geom_errorbar(aes(ymin = ci_lower_boot, ymax = ci_upper_boot, y = CV_Hawley2024, x=ab.cv), width= 0.01, lty="dashed", alpha=0.5, color="black")+
    geom_errorbar(aes(xmin = ci_lower_cv, xmax= ci_upper_cv, x=ab.cv, y = CV_Hawley2024), width=0.1, lty="dashed", alpha=0.5, color="black")+
   
@@ -1105,6 +1052,7 @@ ggplot(het.df, aes(x = ab.pv, y = CV_Hawley2024, color=fct_rev(primary_treatment
        y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
        title = "Comparison of Variability in Antibodies",
        color = "Primary Treatment") +
+  coord_cartesian(ylim=c(0,4), xlim=(c(0,0.35)))+
   scale_color_manual(values=c(pri_colors))+
   theme_minimal()
 
@@ -1170,6 +1118,14 @@ sec.ab %>%
 ggplot(sec.ab %>% filter(band_number == 2449), aes(x=dpi, y=tes, color=secondary_dose))+
   geom_point()
 
+#eyescore only R eye
+ggplot(sec.ab %>% filter(band_number == 2453), aes(x=dpi, y=r_eye_score, color=secondary_dose))+
+  geom_point()
+
+#no quantity
+ggplot(sec.ab %>% filter(band_number == 2453), aes(x=dpi, y=quantity, color=secondary_dose))+
+  geom_point()
+
 ##We want to ask: Of the individuals that became reinfected, how variable were their responses to infection?
   #Therefore, filter so that inf_sec == 1
 # sec.ab <- sec.ab %>%
@@ -1182,6 +1138,12 @@ ggplot(sec.ab %>% filter(band_number == 2449), aes(x=dpi, y=tes, color=secondary
 max.quant.sec <- sec.ab %>%
   group_by(band_number, primary_treatment, secondary_dose) %>%
   reframe(max_quantity = max(quantity, na.rm = TRUE))
+
+max.quant.sec.range <- max.quant.sec %>%
+  filter(secondary_dose == "7000")%>%
+  group_by(primary_treatment, secondary_dose) %>%
+  reframe(range = range(max_quantity+1),
+          lrange = log10(range))
 
 max.quant.sec %>%
   filter(secondary_dose == "7000") %>%
@@ -1259,14 +1221,14 @@ ggplot(sec.ab, aes(x=dpi, y=quantity1, color=primary_treatment))+
 
 
 quant.max.s.log10 <- ggplot(max.sec, aes(x=primary_treatment, y=max_quantity1, color=primary_treatment))+
-  geom_hline(yintercept = 51, lty="dashed", alpha=0.5)+
+  #geom_hline(yintercept = 51, lty="dashed", alpha=0.5)+
   geom_boxplot(outlier.shape = 17, width=0.5)+
   #geom_dotplot(binaxis="y", stackdir="center", dotsize=0.1, binwidth = 1, stackratio = 1, alpha=0.75, aes(fill=primary_treatment))+
   geom_jitter(width=0.25, height=0, alpha=0.5)+
   scale_color_manual(values=pri_colors)+
   scale_fill_manual(values=pri_colors)+
   scale_y_log10()+
-  labs(x="Primary Treatment", y="Log10 Maximum Quantity (7000 Dose)", color="Primary Treatment", fill= "Primary Treatment")
+  labs(x="Primary Treatment", y="log10(Maximum Pathogen Load)", color="Primary Treatment", fill= "Primary Treatment")
 quant.max.s.log10
 
 
@@ -1290,7 +1252,7 @@ max.s.v <- max.sec %>%
     
     # Metrics for max_quantity
     max_quantity = max_quantity1,
-    mean_quantity = mean(max_quantity1),
+    mean_quantity = mean(max_quantity1)-1,
     bird_cv_quantity = calculate_cv(max_quantity1),
     bird_sd_quantity = sd(max_quantity1),
     bird_pv_quantity = calculate_pv(max_quantity1),
@@ -1421,32 +1383,33 @@ s.var <- summary_tibble.s.v %>%
                 CV_lmax_quantity, PV_lmax_quantity, mean_lmax_quantity, SE_lmax_quantity, 
                 n_individuals)
 
+
 #Visualize difference in variability metrics Max Eye Score Secondary
 max_sec_tes.v<- ggplot(summary_tibble.s.v) +
   # geom_point(aes(x = "CV", y = CV_tes, color = primary_treatment), position = position_dodge(width = 0.5)) +
   # geom_errorbar(aes(x = "CV", ymin = lower_ci_cv_tes, ymax = upper_ci_cv_tes, y = CV_tes, color = primary_treatment), 
   #               width = 0., position = position_dodge(width = 0.5)) +
   
-  geom_point(aes(x = "PV", y = PV_tes, color = primary_treatment), position = position_dodge(width = 0.5)) +
-  geom_errorbar(aes(x = "PV", ymin = lower_ci_pv_tes, ymax = upper_ci_pv_tes, y = PV_tes, color = primary_treatment), 
-                width = 0., position = position_dodge(width = 0.5)) +
+  geom_point(aes(x = primary_treatment, y = PV_tes, color = primary_treatment), shape = 17, size=2) +
+  geom_errorbar(aes(x = primary_treatment, ymin = lower_ci_pv_tes, ymax = upper_ci_pv_tes, y = PV_tes, color = primary_treatment), 
+                width = 0, alpha=0.75) +
   
-  geom_point(aes(x = "V2", y = V2_tes, color = primary_treatment), position = position_dodge(width = 0.5)) +
-  geom_errorbar(aes(x = "V2", ymin = lower_ci_v2_tes, ymax = upper_ci_v2_tes, y = V2_tes, color = primary_treatment), 
-                width = 0., position = position_dodge(width = 0.5)) +
+  # geom_point(aes(x = "V2", y = V2_tes, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  # geom_errorbar(aes(x = "V2", ymin = lower_ci_v2_tes, ymax = upper_ci_v2_tes, y = V2_tes, color = primary_treatment), 
+  #               width = 0., position = position_dodge(width = 0.5)) +
   
   scale_color_manual(values = pri_colors) +
   scale_shape_manual(name = "Variability Metric",
                      values = c("CV" = 17, "PV" = 19, "V2" = 18),
                      labels = c("CV" = "CV", "PV" = "PV", "V2" = "CV²")) +
-  labs(title = "Secondary Eye Score Variability",
-       y = "Variability",
-       x = "Metric",
+  labs(
+       y = "Variability in Maximum Eyescore [PV]",
+       x = "Primary Treatment",
        color = "Primary Treatment") +
   scale_y_continuous(limits = c(0,1))+
   theme_bw()+
-  theme(legend.position = "none")
-
+  theme(legend.position = "right")
+max_sec_tes.v
 
 #Visualize difference in variability metrics Max Pathogen Load Secondary
 max_sec_path.v <- ggplot(summary_tibble.s.v) +
@@ -1454,24 +1417,77 @@ max_sec_path.v <- ggplot(summary_tibble.s.v) +
   # geom_errorbar(aes(x = "CV", ymin = lower_ci_cv_quantity, ymax = upper_ci_cv_quantity, y = CV_quantity, color = primary_treatment), 
   #               width = 0., position = position_dodge(width = 0.5)) +
   
-  geom_point(aes(x = "PV", y = PV_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
-  geom_errorbar(aes(x = "PV", ymin = lower_ci_pv_quantity, ymax = upper_ci_pv_quantity, y = PV_quantity, color = primary_treatment), 
-                width = 0., position = position_dodge(width = 0.5)) +
+  geom_point(aes(x = primary_treatment, y = PV_lmax_quantity, color = primary_treatment), shape = 17, size=2) +
+  geom_errorbar(aes(x = primary_treatment, ymin = lower_ci_pv_lmax_quantity, ymax = upper_ci_pv_lmax_quantity, y = PV_lmax_quantity, color = primary_treatment), 
+                width = 0., alpha = 0.75) +
   
-  geom_point(aes(x = "V2", y = V2_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
-  geom_errorbar(aes(x = "V2", ymin = lower_ci_v2_quantity, ymax = upper_ci_v2_quantity, y = V2_quantity, color = primary_treatment), 
-                width = 0., position = position_dodge(width = 0.5)) +
+  # geom_point(aes(x = "V2", y = V2_quantity, color = primary_treatment), position = position_dodge(width = 0.5)) +
+  # geom_errorbar(aes(x = "V2", ymin = lower_ci_v2_quantity, ymax = upper_ci_v2_quantity, y = V2_quantity, color = primary_treatment), 
+  #               width = 0., position = position_dodge(width = 0.5)) +
   
   scale_color_manual(values = pri_colors) +
   scale_shape_manual(name = "Variability Metric",
                      values = c("CV" = 17, "PV" = 19, "V2" = 18),
                      labels = c("CV" = "CV", "PV" = "PV", "V2" = "V2")) +
-  labs(title = "Secondary Pathogen Load Variability",
-       y = "Variability",
-       x = "Metric",
+  labs(
+       y = "Variability in log10(Maximum Pathogen Load) [PV]",
+       x = "Primary Treatment",
        color = "Primary Treatment") +
   scale_y_continuous(limits = c(0,1))+
   theme_bw()
+max_sec_path.v
+
+#Log10 Quantity vs Raw Quantity Variability
+plot_data <- bind_rows(
+  summary_tibble.s.v %>%
+    transmute(
+      primary_treatment,
+      CV = CV_quantity,
+      PV = PV_quantity,
+      CV_lower = lower_ci_cv_quantity,
+      CV_upper = upper_ci_cv_quantity,
+      PV_lower = lower_ci_pv_quantity,
+      PV_upper = upper_ci_pv_quantity,
+      type = "Raw Max Pathogen Load"
+    ),
+  summary_tibble.s.v %>%
+    transmute(
+      primary_treatment,
+      CV = CV_lmax_quantity,
+      PV = PV_lmax_quantity,
+      CV_lower = lower_ci_cv_lmax_quantity,
+      CV_upper = upper_ci_cv_lmax_quantity,
+      PV_lower = lower_ci_pv_lmax_quantity,
+      PV_upper = upper_ci_pv_lmax_quantity,
+      type = "Log10 Max Pathogen Load"
+    )
+) %>%
+  pivot_longer(cols = c(CV, PV), names_to = "metric", values_to = "value") %>%
+  mutate(
+    lower = if_else(metric == "CV", CV_lower, PV_lower),
+    upper = if_else(metric == "CV", CV_upper, PV_upper),
+    type = factor(type, levels = c("Raw Max Pathogen Load", "Log10 Max Pathogen Load"))
+  )
+
+# Combine and reshape for ggplot
+ggplot(plot_data, aes(x = primary_treatment, y = value, color = primary_treatment, shape = metric)) +
+  geom_hline(yintercept = 1, alpha=0.5)+
+  geom_point(position = position_dodge(width = 0.5), size = 2) +
+  geom_errorbar(aes(ymin = lower, ymax = upper, lty= metric), position = position_dodge(width = 0.5), width = 0) +
+  facet_wrap(~type) +
+  labs(
+    #title = "Comparison of CV and PV with 95% Confidence Intervals",
+    x = "Primary Treatment",
+    y = "Variability Metric",
+    color = "Primary Treatment",
+    shape = "Variability Metric",
+    lty = "Variability Metric"
+  ) +
+  scale_y_continuous(limits = c(0, 3)) +
+  scale_color_manual(values = pri_colors)+
+  scale_shape_manual(values = c(1, 16))+
+  scale_linetype_manual(values = c("dashed", "solid"))+
+  theme_bw(base_size = 14)
 
 #Variability in max tes and pathogen load secondary
 max_sec_tes.v+ max_sec_path.v
@@ -1481,12 +1497,13 @@ max_sec_tes.v+ max_sec_path.v
 #Eye Score Secondary
 #Visualize max TES Secondary
 tes.max.s <- ggplot(max.sec, aes(x=primary_treatment, y=max_tes, color=primary_treatment))+
-  geom_boxplot(outlier.shape = 17, width=0.5)+
+  geom_boxplot(outlier.shape = 8, width=0.5)+
   #geom_dotplot(binaxis="y", stackdir="center", dotsize=0.5, binwidth = 0.1, stackratio = 1, alpha=0.75, aes(fill=primary_treatment))+
   geom_jitter(width=0.25, height=0, alpha=0.5)+
+  scale_y_continuous(limits=c(0,6), breaks=c(0, 2, 4, 6))+
   scale_color_manual(values=pri_colors)+
   scale_fill_manual(values=pri_colors)+
-  labs(x="Primary Treatment", y="Maximum Eyescore (7000 Dose)", color="Primary Treatment", fill= "Primary Treatment")
+  labs(x="Primary Treatment", y="Maximum Eyescore", color="Primary Treatment", fill= "Primary Treatment")
 tes.max.s  
 
 # Define a scale transformation factor
@@ -1514,12 +1531,54 @@ tes.max.sec.comb <- ggplot() +
   # Adjust y-axis labels with secondary y-axis
   scale_y_continuous(
     name = "Maximum Eyescore Secondary",
-    sec.axis = sec_axis(~ . / scale_factor.es, name = "PV Total Eye Score")
+    sec.axis = sec_axis(~ . / scale_factor.es, name = "PV Maximum Eyescore Secondary")
   ) +
   
   labs(x="Primary Treatment", color="Primary Treatment", fill="Primary Treatment")
 
 tes.max.sec.comb
+
+
+#Brown-Forsythe
+leveneTest(max_tes ~ primary_treatment, data = max.tes.sec %>% filter(secondary_dose == "7000"), center = median)
+
+max.tes.sec %>%
+  group_by(primary_treatment) %>%
+  mutate(dev_from_med = abs(max_tes - median(max_tes))) %>%
+  ggplot(aes(x = interaction(primary_treatment), y = dev_from_med)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "Treatment", y = "|Deviation from Median max_tes|")
+
+dat <- max.tes.sec %>% filter(secondary_dose == "7000")
+
+# Get all pairwise combinations of groups
+pairwise_results_max_tes <- combn(unique(dat$primary_treatment), 2, simplify = FALSE) %>%
+  map_df(~{
+    subdat <- dat %>% filter(primary_treatment %in% .x)
+    test <- leveneTest(max_tes ~ primary_treatment, data = subdat, center = median)
+    tibble(
+      group1 = .x[1],
+      group2 = .x[2],
+      F_value = test[1, "F value"],
+      p_value = test[1, "Pr(>F)"]
+    )
+  }) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
+
+dat %>%
+  group_by(primary_treatment) %>%
+  mutate(dev_from_med = abs(max_tes - median(max_tes))) %>%
+  ggplot(aes(x = primary_treatment, y = dev_from_med, color=primary_treatment)) +
+  geom_boxplot(outlier.shape = 8, alpha=0.5) +
+  geom_jitter(height=0)+
+  scale_color_manual(values = pri_colors)+
+  labs(title = "Deviation from Median max_tes by Treatment",
+       y = "|Deviation from Median|",
+       x = "Primary Treatment") +
+  theme_minimal()
+
+#High has significantly less variation in tes than low and sham, but no significant difference between low and sham
 
 
 #Path Load Secondary
@@ -1529,13 +1588,15 @@ tes.max.sec.comb
 max(log10(max.quant.sec$max_quantity))
 scale_factor.lpl <- 6 / 1
 
-
+max.quant.sec$lmax_quantity <- log10(max.quant.sec$max_quantity+1)
 
 quant.lmax.sec.comb <- ggplot() +
   # Primary y-axis: max quantity
   geom_hline(yintercept = log10(51), lty="dashed", alpha=0.5)+
-  geom_boxplot(data=max.quant.sec %>% filter(secondary_dose == "7000"), aes(x=primary_treatment, y=log10(max_quantity+1), color=primary_treatment), outlier.shape = 8, width=0.25) +
-  geom_jitter(data=max.quant.sec %>% filter(secondary_dose == "7000"), aes(x=primary_treatment, y=log10(max_quantity+1), color=primary_treatment), width=0.25, height=0, alpha=0.5) +
+  geom_boxplot(data=max.quant.sec %>% filter(secondary_dose == "7000"), 
+               aes(x=primary_treatment, y=lmax_quantity, color=primary_treatment), outlier.shape = 8, width=0.25) +
+  geom_jitter(data=max.quant.sec %>% filter(secondary_dose == "7000"), 
+              aes(x=primary_treatment, y=lmax_quantity, color=primary_treatment), width=0.25, height=0, alpha=0.5) +
   
   # Secondary y-axis: PV TES (rescaled)
   geom_errorbar(data=summary_tibble.s.v,
@@ -1553,23 +1614,107 @@ quant.lmax.sec.comb <- ggplot() +
   # Adjust y-axis labels with secondary y-axis
   scale_y_continuous(
     name = "Log10(Maximum Pathogen Load) Secondary",
-    sec.axis = sec_axis(~ . / scale_factor.lpl, name = "PV Pathogen Load")
+    sec.axis = sec_axis(~ . / scale_factor.lpl, name = "PV Log10(Maximum Pathogen Load) Secondary")
   ) +
+  theme(axis.title.y.right = element_text(angle = 90))+
   labs(x="Primary Treatment", color="Primary Treatment", fill="Primary Treatment")
 
 quant.lmax.sec.comb
 # #Figure 6
 # quant.max.pri.comb / quant.max.sec.comb
 
+dat <- max.quant.sec %>% filter(secondary_dose == "7000")
+
+# Get all pairwise combinations of groups
+pairwise_results_lmax_quantity <- combn(unique(dat$primary_treatment), 2, simplify = FALSE) %>%
+  map_df(~{
+    subdat <- dat %>% filter(primary_treatment %in% .x)
+    test <- leveneTest(lmax_quantity ~ primary_treatment, data = subdat, center = median)
+    tibble(
+      group1 = .x[1],
+      group2 = .x[2],
+      F_value = test[1, "F value"],
+      p_value = test[1, "Pr(>F)"]
+    )
+  }) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
+
+#non-log10 transformed
+dat <- max.quant.sec %>% filter(secondary_dose == "7000")
+pairwise_results_raw_max_quant <- combn(unique(dat$primary_treatment), 2, simplify = FALSE) %>%
+  map_df(~{
+    subdat <- dat %>% filter(primary_treatment %in% .x)
+    test <- leveneTest(max_quantity ~ primary_treatment, data = subdat, center = median)
+    tibble(
+      group1 = .x[1],
+      group2 = .x[2],
+      F_value = test[1, "F value"],
+      p_value = test[1, "Pr(>F)"]
+    )
+  }) %>%
+  mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
+
+
+#save
+# write_csv(pairwise_results_max_tes,
+#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/BF_pairwise_results_max_tes.csv")
+# write_csv(pairwise_results_lmax_quantity,
+#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/BF_pairwise_results_lmax_quant.csv")
+# write_csv(pairwise_results_raw_max_quant, 
+#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/BF_pairwise_results_raw_max_quant.csv")
+# write_csv(pairwise_results_ab_41,
+#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/BF_pairwise_results_ab_41.csv")
+
 
 #Alternatively, just secondary
 tes.max.sec.comb / quant.lmax.sec.comb 
 
-final_plot <- tes.max.sec.comb / quant.lmax.sec.comb
+final_plot <- quant.lmax.sec.comb / tes.max.sec.comb 
+
 
 # Print the final plot
 print(final_plot)
 
+fig5 <- (quant.max.s.log10+max_sec_path.v)/
+  (tes.max.s + max_sec_tes.v)
+fig5
+
+# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Figures/Fig5.png",
+#         plot=fig5, width=10, height=8, dpi = 300)
+
+max(max.quant.sec$max_quantity)
+scale_factor.rp <- 350000 / 1
+
+quant.max.sec.comb <- ggplot() +
+  # Primary y-axis: max quantity
+  geom_hline(yintercept = 50, lty="dashed", alpha=0.5)+
+  geom_boxplot(data=max.quant.sec %>% filter(secondary_dose == "7000"), aes(x=primary_treatment, y=max_quantity, color=primary_treatment), outlier.shape = 8, width=0.25) +
+  geom_jitter(data=max.quant.sec %>% filter(secondary_dose == "7000"), aes(x=primary_treatment, y=max_quantity, color=primary_treatment), width=0.25, height=0, alpha=0.5) +
+  
+  # Secondary y-axis: PV TES (rescaled)
+  geom_errorbar(data=summary_tibble.s.v,
+                aes(x=primary_treatment, y=PV_quantity * scale_factor.rp, ymin = lower_ci_pv_quantity * scale_factor.rp,
+                    ymax = upper_ci_pv_quantity * scale_factor.rp), width=0.15, lty="dashed") +
+  geom_point(data=summary_tibble.s.v, aes(x=primary_treatment, y=PV_quantity * scale_factor.rp, color=primary_treatment),
+             shape = 17, size=3, alpha=1) +
+  geom_point(data=summary_tibble.s.v, aes(x=primary_treatment, y=PV_quantity * scale_factor.rp), shape = 24, size=3) +
+  
+  
+  # Manual color and fill
+  scale_color_manual(values=pri_colors) +
+  scale_fill_manual(values=pri_colors) +
+  
+  # Adjust y-axis labels with secondary y-axis
+  scale_y_continuous(
+    name = "Maximum Pathogen Load Secondary",
+    sec.axis = sec_axis(~ . / scale_factor.rp, name = "PV Pathogen Load")
+  ) +
+  theme(axis.title.y.right = element_text(angle = 90))+
+  labs(x="Primary Treatment", color="Primary Treatment", fill="Primary Treatment")
+
+t1 <- (quant.lmax.sec.comb + quant.max.sec.comb)
+
+t1
 #Table 2; Summary of results for eyescore and pathogen load for secondary variability
 s.var
 #write_xlsx(s.var, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/secondary_variability.xlsx")
@@ -1594,9 +1739,6 @@ kruskal_tes_summary <- tibble(
   df = kruskal_tes$parameter,
   p_value = kruskal_tes$p.value
 )
-
-
-
 
 #Kruskal Wallis Tests
 kruskal_quant<- kruskal.test(lmax_quantity ~ primary_treatment, data=max.sec)
@@ -1632,4 +1774,62 @@ kruskal_quant_summary <- tibble(
 #  "EEID_1A_Antibody_Analysis_files/Results/combined_quant_sec_kruskal_dunn.xlsx"
 # )
 
-       
+
+sec.ab %>% filter(band_number == 2449) %>% dplyr::select(band_number, dpi, dpsi, l_eye_score, r_eye_score, quantity, inf_sec)
+sec.ab %>% filter(band_number == 2453) %>% dplyr::select(band_number, dpi, dpsi, l_eye_score, r_eye_score, quantity, inf_sec)
+
+#Do the proportion of infected individuals differ between priming doses?
+  #The expected number of observations is less than 5, therefore use Fisher's Exact Test instead of chi-square
+#Fisher's Exact Test 
+counts <- sec.ab %>%
+  filter(dpi == 56)%>%
+  dplyr::select(primary_treatment, secondary_dose, band_number, dpi, inf_sec)%>%
+  group_by(primary_treatment, secondary_dose)%>%
+  summarise(inf_sec_n = sum(inf_sec == 1),
+            not_inf_sec_n =sum(inf_sec == 0))
+
+counts_7k <- counts %>%
+  filter(secondary_dose == 7000)
+
+fisher_t <- matrix(
+  c(counts_7k$inf_sec_n, counts_7k$not_inf_sec_n),
+  nrow=3,
+  byrow=FALSE,
+  dimnames = list(
+    c("Sham", "Low", "High"),
+    c("Infected Secondary", "Not Infected Secondary")
+  )
+)
+
+fisher.test(fisher_t)
+
+p_raw <- c(
+  "High vs Low"  = fisher.test(matrix(c(2, 8, 6, 6), nrow = 2, byrow = TRUE))$p.value,
+  "Low vs Sham"  = fisher.test(matrix(c(6, 6, 12, 0), nrow = 2, byrow = TRUE))$p.value,
+  "High vs Sham" = fisher.test(matrix(c(2, 8, 12, 0), nrow = 2, byrow = TRUE))$p.value)
+
+
+p_adjusted <- p.adjust(p_raw, method = "holm")
+
+# Output
+names(p_adjusted) <- c("High vs Low", "Low vs Sham", "High vs Sham")
+
+p_df <- data.frame(
+  comparison = names(p_adjusted),
+  p_raw = as.numeric(p_raw),
+  p_adjusted = as.numeric(p_adjusted)
+)
+
+#write_xlsx(p_df, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/fisher_test_sec_inf.xlsx")
+
+
+counts %>%
+  mutate(
+    total = inf_sec_n + not_inf_sec_n,
+    prop_infected = inf_sec_n / total
+  ) %>%
+  ggplot(aes(x = factor(secondary_dose), y = prop_infected, fill = primary_treatment)) +
+  geom_col(position = position_dodge(), alpha=0.9) +
+  labs(x = "Secondary Dose (CCU/mL)", y = "Proportion Infected", fill = "Priming Treatment") +
+  scale_fill_manual(values=pri_colors)+
+  theme_bw()
