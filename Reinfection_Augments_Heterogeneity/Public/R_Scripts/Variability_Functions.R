@@ -1,5 +1,5 @@
-#Functions for Reinfection_Final_Code.R
-#### Define functions for calculating CV, PV, and V2 ####
+#Functions for Reinfection_Augments_Heterogeneity.R
+#### Define functions for calculating CV, PV, V2, and SE ####
 calculate_cv <- function(data) {
   return(sd(data) / mean(data))
 }

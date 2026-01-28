@@ -605,7 +605,7 @@ p.aba %>%
   ggplot(aes(x = interaction(primary_treatment, dpi.f), y = dev_from_med)) +
   geom_boxplot() +
   theme_minimal() +
-  labs(x = "Treatment x DPI", y = "|Deviation from Median ELISA OD|")
+  labs(x = "Treatment x DPI", y = "|Deviation from Median ELISA OD|") 
 
 dat <- p.aba %>% filter(dpi.f == 41)
 

@@ -1,10 +1,10 @@
 #Reinfection Augemts Heterogeneity
 ####95% CIs for CoV from gamma distributed susceptibility from Hawley et al., 2024####
 #Requires all_pseudosets.csv, deviance_params_noday41positives.csv
+library(dplyr)
 
-
-ps <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Susceptibility Paper Code/all_pseudosets.csv")
-dp <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Susceptibility Paper Code/deviance_params_noday41positives.csv")
+ps <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/Hawley et al 2024 Datasets/all_pseudosets.csv")
+dp <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/Hawley et al 2024 Datasets/deviance_params_noday41positives.csv")
 
 ps$shape <- ps$par1.gamma
 ps$scale <- ps$par2.gamma
@@ -36,17 +36,21 @@ cv_summary <- ps %>%
   summarise(
     mean_CV = mean(CV_gamma, na.rm = TRUE),
     median_CV = median(CV_gamma, na.rm = TRUE),  # Also compute median to compare
-    CI_lower = quantile(CV_gamma, probs = 0.025, na.rm = TRUE),
-    CI_upper = quantile(CV_gamma, probs = 0.975, na.rm = TRUE)
+    CI_lower_95 = quantile(CV_gamma, probs = 0.025, na.rm = TRUE),
+    CI_upper_95 = quantile(CV_gamma, probs = 0.975, na.rm = TRUE),
+    CI_lower_66 = quantile(CV_gamma, probs = 0.17, na.rm = TRUE),
+    CI_upper_66 = quantile(CV_gamma, probs = 0.83, na.rm = TRUE),
   ) %>%
   mutate(bird.groups = factor(bird.groups, levels = c("0 va", "750 va", "30000 va"))) %>%
   arrange(bird.groups)
 
 cv_summary
 
+library(ggplot2)
+
 ggplot(cv_summary, aes(x=bird.groups, y=mean_CV))+
   geom_point(data=dp, aes(x=group, y=CV_gamma))+
-  geom_errorbar(aes(x=bird.groups, y=mean_CV, ymin = CI_lower, ymax= CI_upper))
+  geom_errorbar(aes(x=bird.groups, y=mean_CV, ymin = CI_lower_95, ymax= CI_upper_95))
 
-ci_upper_boot <- cv_summary$CI_upper
-ci_lower_boot <- cv_summary$CI_lower
+ci_upper_boot <- cv_summary$CI_upper_95
+ci_lower_boot <- cv_summary$CI_lower_95

@@ -1,6 +1,10 @@
 #Data Cleaning Script EEID21 Antibody Analysis
 #Requires: EEID2021_master_data_20220503.csv, EEID_1a_ELISA.csv
 #Produces: reinfection_response.csv, reinfection_response.rds"
+setwd("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/")
+
+#Load packages
+library(tidyverse)
 
 master <- read.csv("EEID2021_master_data_20220503.csv")
 ab <- read.csv("EEID_1a_ELISA.csv")
@@ -71,6 +75,7 @@ m.ab$seropos_cutoff = 0.061
 m.ab$pathology_cutoff = 0
 
 #generate infection column: If quantity > 50, inf = 1, else, inf=0
+#Adjust to make cutoff > 1
 m.ab <- m.ab %>%
    arrange(band_number, dpi) %>%
 
@@ -78,7 +83,7 @@ m.ab <- m.ab %>%
    mutate(quantity_clean = coalesce(quantity, 0)) %>%
 #   
 #   # Flag individual days meeting quantity criteria
-   mutate(day_inf = if_else(quantity_clean > 50, 1, 0)) %>%
+   mutate(day_inf = if_else(quantity_clean > threshold_cutoff, 1, 0)) %>% #cutoff = threshold_cutoff
 #   
    group_by(band_number) %>%
 #   
@@ -91,6 +96,7 @@ m.ab <- m.ab %>%
 
   ungroup()
 
+
 m.ab %>%
   filter(dpi == -8) %>%
   dplyr::select(primary_treatment, secondary_dose, inf, inf_pri, inf_sec)%>%
@@ -101,7 +107,7 @@ m.ab %>%
     label ~ "**All Birds Before Removal**"
   )
 
-#omit birds (n=6)
+#omit birds (n=1)
 #omit 2505 from data set for analysis as it was positive at quarantine (n=1)
 m.ab <- m.ab %>%
   filter(band_number != 2505)
@@ -116,31 +122,12 @@ m.ab %>%
     label ~ "**All Birds After Seropos -8 Removed**"
   )
 
-#omit 2452 (1.99E2 @ DPPI 7) and 2562 (1.68E2 DPPI -8) bc positive qpcr and they are shams (n=2)
-m.ab <- m.ab %>% filter(!band_number %in% c(2452, 2562)) 
 
-#omit sham birds with eye scores (0.5) (2419, 2434) (n=2)
-m.ab <- m.ab %>% filter(!band_number %in% c(2419, 2434))
+##Some birds did not fully recover after primary infection. These birds were excluded as in (Hawley et al., 2024)
 
-#omit sham bird with path load (2514) (67.6 @ DPPI 41) (n=1)
-m.ab <- m.ab %>% filter(band_number != 2514)
-
-m.ab %>%
-  filter(dpi == -8) %>%
-  dplyr::select(primary_treatment, secondary_dose, inf_pri, inf_sec)%>%
-  tbl_summary(
-    by=primary_treatment
-  )%>%
-  modify_header(
-    label ~ "**Birds After Bad Shams and Seropos -8 Removed**"
-  )
-
-##Some birds did not fully recover after primary infection. These birds were included in primary analysis, but will be excluded
-#from secondary analysis. I have identified these birds below, but *will not remove them until secondary analysis*.
-
-#check birds that were not recovered by secondary infection: 2274, 2469, 2520, 2494 (2514 not recovered but omitted above)
+#check birds that were not recovered by secondary infection: 2274, 2469, 2520, 2494, 2514
 not_recovered <- m.ab %>% 
-  filter(band_number %in% c(2274, 2469, 2520, 2494))%>%
+  filter(band_number %in% c(2274, 2469, 2520, 2494, 2514))%>%
   dplyr::select(band_number, dpi, primary_treatment, secondary_dose, quantity, tes)
 
 not_recovered %>%
@@ -152,28 +139,20 @@ not_recovered %>%
     label ~ "**Birds Not Recovered DPI 41**"
   )
 
+#Omit not recovered birds as they were omitted from Hawley et al., 2024
+m.ab <- m.ab %>% filter(!band_number %in% c(2274, 2469, 2520, 2494, 2514))
+
 #Starting Sample Sizes
 m.ab %>%
   filter(dpi == -8)%>%
   dplyr::select(primary_treatment, secondary_dose)%>%
   tbl_summary(
-    by=primary_treatment
+    by=secondary_dose
   )%>%
   modify_header(
-    label ~ "**Starting Sample Size**"
+    label ~ "**Sample Sizes**"
   )
 
-
-#Sample Sizes Secondary Pathology (removing 4 unrecovered birds)
-m.ab %>% filter(!band_number %in% c(unique(not_recovered$band_number))) %>%
-  filter(dpi == -8)%>%
-  dplyr::select(primary_treatment, secondary_dose)%>%
-  tbl_summary(
-    by=primary_treatment
-  )%>%
-  modify_header(
-    label ~ "**Sample Size Secondary**"
-  )
 
 head(m.ab)
 tail(m.ab)
