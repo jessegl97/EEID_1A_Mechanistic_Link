@@ -1,8 +1,8 @@
-####Does prior pathogen exposure augment population-level heterogeneity in transmission-relevant traits?####
+####Prior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system####
 ##Final Analysis; Peer Review
-## Jun 2025; Updated Jan 2026
+## Jun 2025; Updated March 2026
 ## JGL
-#Requires: reinfection_response.rds, Variability_Functions.R, CIs_Sus_4042.R
+#Requires: reinfection_response.rds, Variability_Functions.R, CIs_Sus_2024.R
 
 ####Load Packages + Read in Data####
 rm(list=ls())

@@ -1,4 +1,5 @@
-#Data Cleaning Script EEID21 Antibody Analysis
+#Prior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system
+#Data Cleaning Script
 #Requires: EEID2021_master_data_20220503.csv, EEID_1a_ELISA.csv
 #Produces: reinfection_response.csv, reinfection_response.rds"
 setwd("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/")

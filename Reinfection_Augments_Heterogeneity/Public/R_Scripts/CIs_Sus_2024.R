@@ -1,4 +1,4 @@
-#Reinfection Augemts Heterogeneity
+#RPrior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system
 ####95% CIs for CoV from gamma distributed susceptibility from Hawley et al., 2024####
 #Requires all_pseudosets.csv, deviance_params_noday41positives.csv
 library(dplyr)
