@@ -19,6 +19,11 @@ m.ab <- m.ab %>%
 m.ab <- m.ab %>%
   filter(experiment_location == "vt") #include only birds at VT
 
+#remove unused data
+m.ab <- m.ab %>%
+  dplyr::select(-c(tears, tears_vol_l, tears_vol_r, rbcs, smear, experiment_location, antimalarials, recovered_prior_sec,
+                   mass_cap, vital_notes, MG.....OD.0.0621., ELISA.notes, population))
+
 #rename columns
 names(m.ab)[names(m.ab) == "date.x"] <- "date"
 names(m.ab)[names(m.ab) == "band_number.x"] <- "band_number"
@@ -159,5 +164,5 @@ head(m.ab)
 tail(m.ab)
 
 #save final dataframe
-#saveRDS(m.ab, file ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.rds")
-#write.csv(m.ab, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.csv", row.names=FALSE)
+saveRDS(m.ab, file ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.rds")
+write.csv(m.ab, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.csv", row.names=FALSE)

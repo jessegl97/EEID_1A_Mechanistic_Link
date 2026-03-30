@@ -32,6 +32,7 @@ p_load(gtsummary, writexl)
 #import data
 #m.ab = merged + formatted working df
 m.ab <- readRDS("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.rds")
+m.ab <- readRDS("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response1.rds")
 #Infected column: inf = if quantity (where any NA is replaced with 0) is greater than cutoff of 50 copies return 1, else return 0
 
 ####Format theme####

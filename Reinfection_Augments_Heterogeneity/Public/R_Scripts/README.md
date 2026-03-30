@@ -19,6 +19,10 @@ secondary doses. Blood was collected from birds 8 days prior to inoculation as w
 with MG, from which antibody levels were quantified using an anti-MG ELISA kit. Pathogen loads and pathology
 (eye score) were quantified across the course of the experiment.
 
+##Replicability##
+For a complete re-analysis, run dataCleaning_EEID1A.R to generate reinfection_response.rds for
+Reinfection_Augments_Heterogeneity.R. The data cleaning script cleans up the raw data for analysis.
+
 ##Data Files##
 1. EEID2021_master_data_20220503.csv
 Description: Raw data file with data pathology, pathogen load, and susceptibility data from all experimental birds across all experimental days
