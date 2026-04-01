@@ -1,7 +1,43 @@
-####Prior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system####
-##Final Analysis; Peer Review
-## Jun 2025; Updated March 2026
-## JGL
+####Prior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads
+#in a songbird-pathogen system####
+#MIT License
+# 
+# Copyright (c) [2026] [Garrett-Larsen et al.]
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#   
+#   The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# REPRODUCIBILITY
+#   - No setwd(); uses {here} for project-relative paths
+#   - Assumes you open/run from the project root
+
+
+# EXPECTED STRUCTURE
+#   project_root/
+#       Reinfection_Augments_Heterogeneity.R
+#       Variability_Functions.R
+#       CIs_Sus_2024.R
+#       reinfection_response.rds
+#       all_pseudosets.csv
+#       deviance_params_noday41positives.csv
+
+
+############################################################################
 #Requires: reinfection_response.rds, Variability_Functions.R, CIs_Sus_2024.R
 
 ####Load Packages + Read in Data####
@@ -31,7 +67,7 @@ p_load(gtsummary, writexl)
 
 #import data
 #m.ab = merged + formatted working df
-m.ab <- readRDS("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/reinfection_response.rds")
+m.ab <- readRDS("reinfection_response.rds")
 #Infected column: inf = if quantity (where any NA is replaced with 0) is greater than cutoff of 50 copies return 1, else return 0
 
 ####Format theme####
@@ -195,7 +231,7 @@ pairwise_df <- as.data.frame(summary(pairwise))
 #     Random_Effects = random_effects,
 #     Pairwise_Comparisons = pairwise_df
 #   ),
-#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Supplementary/TableS1.xlsx"
+#   "TableS1.xlsx"
 # )
 
 #Model Predictions
@@ -236,7 +272,7 @@ p.aba <-  p.ab %>%
 #> corresponding to the 2.5th and 97.5th percentiles.
 
 #Read in variability functions
-source("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/R_Scripts/Variability_Functions.R")
+source("Variability_Functions.R")
 
 #Calculate Variability in Antibody Levels Primary
 # Set the number of bootstrap replicates
@@ -298,7 +334,7 @@ summary_tibble_priming_ab <- a.cv %>%
     n_individuals = n_distinct(band_number) #calculate number of individuals in each group
   ) %>%
   as_tibble()
-#write.csv(summary_tibble_priming_ab, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/EEID_1A_Antibody_Analysis_files/Results/Antibody_Variability_Primary.csv", row.names=FALSE)
+#write.csv(summary_tibble_priming_ab, "Antibody_Variability_Primary.csv", row.names=FALSE)
 
 #FIGURE 2 raw data + predictions
 fig2.raw<-ggplot(data = p.abt, aes(x = dpi.f, y = elisa_od, color = primary_treatment)) +
@@ -388,10 +424,10 @@ fig2 <- (fig2.raw + fig2.pv &
                  plot.tag = element_text(size = 20, face="bold"))) + 
   patchwork::plot_annotation(tag_levels = 'a')
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/Fig2.png",
+# ggsave(filename ="Fig2.png",
 #       plot=fig2, width=10, height=6, dpi = 300)
 
-# ggsave(filename ="/Users/jesse/Documents/Virginia Tech/Research/EEID Heterogeneity Grant/Expt1A (VA94 Dose)/Manuscript/Final Scientific Reports Submission/Review/Final Review/Final Submission Mar2026/Final Submission/Figures/Fig2.png",
+# ggsave(filename ="Fig2.png",
 #        plot=fig2, width=10, height=6, dpi = 300)
 
 #Figure S1
@@ -455,7 +491,7 @@ figS1<-ggplot(data = p.aba.m, aes(x = dpi.f, y = elisa_od, color = primary_treat
     legend.text = element_text(size=15)
   )
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/FigS1.png",
+# ggsave(filename ="FigS1.png",
 #       plot=figS1, width=9, height=6, dpi = 300)
 
 ####Are antibody levels equally variable across dpi and primary_treatment?####
@@ -481,7 +517,7 @@ pairwise_results_ab_41 <- combn(unique(dat41$primary_treatment), 2, simplify = F
   mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
 
 # write_csv(pairwise_results_ab_41,
-#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/BF Results/BF_pairwise_results_ab_41.csv")
+#   "BF_pairwise_results_ab_41.csv")
 
 dat14 <- p.aba %>% filter(dpi.f == 14)
 
@@ -502,7 +538,7 @@ pairwise_results_ab_14 <- combn(unique(dat14$primary_treatment), 2, simplify = F
   mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
 
 # write_csv(pairwise_results_ab_14,
-#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/BF Results/BF_pairwise_results_ab_14.csv")
+#   "BF_pairwise_results_ab_14.csv")
 
 ####Analysis #2 Does individual variation in antibody response to infection predict reinfection probability?####
 ####Do Individual Differences in Antibody Levels Predict Secondary Susceptibility?
@@ -594,7 +630,7 @@ model_info <- data.frame(
 
 final_summary_pre <- cbind(coef_df, model_info)
 
-#write.csv(final_summary_pre, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Antibodies and Susceptibility/glm_ab_pre_full_summary.csv", row.names = TRUE)
+#write.csv(final_summary_pre, "glm_ab_pre_full_summary.csv", row.names = TRUE)
 
 ##DPPI 14
 #Fifteen plasma samples were lost from DPPI 14 sampling and one from DPPI 41 sampling, resulting in reduced sample sizes for antibody analyses.
@@ -638,7 +674,7 @@ model_info <- data.frame(
 final_summary_14 <- cbind(coef_df, model_info)
 
 #Table S2 Part 1
-#write.csv(final_summary_14, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Antibodies and Susceptibility/glm_ab14_full_summary.csv", row.names = TRUE)
+#write.csv(final_summary_14, "glm_ab14_full_summary.csv", row.names = TRUE)
 
 mod <- glm.ab14
 dat.new14=expand.grid(log10.sec_dose=unique(wibird14$log10.sec_dose),
@@ -712,7 +748,7 @@ model_info <- data.frame(
 final_summary_41 <- cbind(coef_df, model_info)
 
 #Table S2 Part 2
-#write.csv(final_summary_41, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Antibodies and Susceptibility/glm_ab41_full_summary.csv", row.names = TRUE)
+#write.csv(final_summary_41, "glm_ab41_full_summary.csv", row.names = TRUE)
 
 
 mod <- glm.ab41
@@ -762,7 +798,7 @@ Fig3 <- (sus_14_raw / sus_41_raw &
   patchwork::plot_annotation(tag_levels = 'a')
 
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/Fig3.png",
+# ggsave(filename ="Fig3.png",
 #         plot=Fig3, width=9, height=6, dpi = 300)
 
 
@@ -770,7 +806,7 @@ Fig3 <- (sus_14_raw / sus_41_raw &
 #extract variability metrics from summary_tibble_priming_ab a.cv calculations
 summary_tibble_priming_ab %>% filter(dpi.f == 41)
 
-source("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/R_Scripts/CIs_Sus_2024.R")
+source("CIs_Sus_2024.R")
 
 
 # Filter to just dpi.f == 41
@@ -812,7 +848,7 @@ Fig4 <- ggplot(het.df, aes(x = ab_pv, y = CV_Hawley2024, color=dose)) +
        y = "Variability in Susceptibility (CV) Hawley et al., 2024", 
        color="Primary Treatment") 
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/Fig4.png",
+# ggsave(filename ="Fig4.png",
 #         plot=Fig4, width=10, height=8, dpi = 300)
 
 
@@ -1039,7 +1075,7 @@ s.var <- summary_tibble.s.v %>%
                 CV_lmax_quantity, PV_lmax_quantity, mean_lmax_quantity, SE_lmax_quantity,
                 n_individuals)
 
-#write.csv(s.var, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Supplementary/TableS3.csv", row.names = TRUE)
+#write.csv(s.var, "TableS3.csv", row.names = TRUE)
 
 #Visualize difference in variability metrics Max Eye Score Secondary
 max_sec_tes.v<- ggplot(summary_tibble.s.v) +
@@ -1222,7 +1258,7 @@ s.var.i <- summary_tibble.s.v.i %>%
                 CV_lmax_quantity, PV_lmax_quantity, mean_lmax_quantity, SE_lmax_quantity, 
                 n_individuals)
 
-#write.csv(s.var.i, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Supplementary/TableS3.i.csv", row.names = TRUE)
+#write.csv(s.var.i, "TableS3.i.csv", row.names = TRUE)
 
 #Remove high priming data points and error bars as variability from 2 points is not statistically valid
 var_plot_df <- summary_tibble.s.v.i %>%
@@ -1347,7 +1383,7 @@ fig5.path <- (
 
 fig5.path
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/Fig5.png",
+# ggsave(filename ="Fig5.png",
 #         plot=fig5.path, width=12, height=10, dpi = 300)
 
 
@@ -1362,7 +1398,7 @@ fig6.tes <- (
 
 fig6.tes
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/Fig6.png",
+# ggsave(filename ="Fig6.png",
 #         plot=fig6.tes, width=12, height=10, dpi = 300)
 
 #Compare Log10 Quantity vs Raw Quantity Variability
@@ -1398,7 +1434,7 @@ tableS5 <- bind_rows(
     type = factor(type, levels = c("Raw Max Pathogen Load", "log10(Max Pathogen Load)"))
   )
 
-#write.csv(tableS5, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Supplementary/TableS5.csv", row.names = TRUE)
+#write.csv(tableS5, "TableS5.csv", row.names = TRUE)
 
 # Figure S2
 figS2 <- ggplot(tableS5, aes(x = primary_treatment_names, y = value, color = primary_treatment_names, shape = metric)) +
@@ -1420,7 +1456,7 @@ figS2 <- ggplot(tableS5, aes(x = primary_treatment_names, y = value, color = pri
   scale_linetype_manual(values = c("dashed", "solid"))+
   theme_bw(base_size = 14)
 
-# ggsave(filename ="/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Figures/FigS2.png",
+# ggsave(filename ="FigS2.png",
 #         plot=figS2, width=9, height=6, dpi = 300)
 
 
@@ -1456,7 +1492,7 @@ tableS5.i <- bind_rows(
     type = factor(type, levels = c("Raw Max Pathogen Load", "log10(Max Pathogen Load)"))
   )
 
-#write.csv(tableS5.i, "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Supplementary//TableS5.i.csv", row.names = TRUE)
+#write.csv(tableS5.i, "TableS5.i.csv", row.names = TRUE)
 
 tableS5.i.plot <- tableS5.i %>%
   filter(primary_treatment_names != "High Priming")
@@ -1482,7 +1518,7 @@ figS2i <- ggplot(tableS5.i.plot, aes(x = primary_treatment_names, y = value, col
   scale_linetype_manual(values = c("dashed", "solid"))+
   theme_bw(base_size = 14)
 
-# ggsave(filename ="/Users/jesse/Documents/Virginia Tech/Research/EEID Heterogeneity Grant/Expt1A (VA94 Dose)/Manuscript/Final Scientific Reports Submission/Review/Figures/FigS2.png",
+# ggsave(filename ="FigS2.png",
 #         plot=figS2, width=9, height=6, dpi = 300)
 
 #Are max eye scores equally variable across priming doses upon secondary challenge?
@@ -1508,7 +1544,7 @@ pairwise_results_max_tes <- combn(unique(dat$primary_treatment), 2, simplify = F
   mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
 
 # write_csv(pairwise_results_max_tes,
-#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/BF Results/BF_pairwise_results_max_tes.csv")
+#   "BF_pairwise_results_max_tes.csv")
 
 #Are max eye scores equally variable across priming doses upon secondary challenge?
 #Brown-Forsythe Infected birds
@@ -1539,7 +1575,7 @@ pairwise_results_lmax_quantity <- combn(unique(dat$primary_treatment), 2, simpli
   mutate(p_adj = p.adjust(p_value, method = "BH"))  # Adjust for multiple comparisons
 
 # write_csv(pairwise_results_lmax_quantity,
-#   "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/BF Results/BF_pairwise_results_lmax_quant.csv")
+#   "BF_pairwise_results_lmax_quant.csv")
 
 #Brown-Forsythe Infected only
 leveneTest(lmax_quantity ~ primary_treatment, data = max.quant.sec %>%
@@ -1646,5 +1682,5 @@ dunn_quant_df <- tibble(
 # write_xlsx(
 #   list(KruskalWallis_TES = kruskal_tes_summary, DunnTest_TES = dunn_tes_df,
 #      KruskalWallis_lQuant = kruskal_quant_summary, DunnTest_lQuant = dunn_quant_df),
-#  "/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Results/Mean Pathogen Load and Pathology/combined_tes_lquant_sec_kruskal_dunn.xlsx"
+#  "combined_tes_lquant_sec_kruskal_dunn.xlsx"
 # )

@@ -1,10 +1,54 @@
-#RPrior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system
+#Prior pathogen exposure augments inter-individual heterogeneity in antibody levels and reinfection loads in a songbird-pathogen system
+
 ####95% CIs for CoV from gamma distributed susceptibility from Hawley et al., 2024####
+  #Hawley, D. M., Pérez-Umphrey, A. A., Adelman, J. S., Fleming-Davies, A. E., Garrett-Larsen, J., Geary, S. J.,
+    #Childs, L. M., & Langwig, K. E. (2024). Prior exposure to pathogens augments host heterogeneity in susceptibility
+    #and has key epidemiological consequences. PLOS Pathogens, 20(9), e1012092. https://doi.org/10.1371/journal.ppat.1012092
+
+#MIT License
+# 
+# Copyright (c) [2026] [Garrett-Larsen et al.]
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#   
+#   The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# REPRODUCIBILITY
+#   - No setwd(); uses {here} for project-relative paths
+#   - Assumes you open/run from the project root
+
+
+# EXPECTED STRUCTURE
+#   project_root/
+#       Reinfection_Augments_Heterogeneity.R
+#       Variability_Functions.R
+#       CIs_Sus_2024.R
+#       reinfection_response.rds
+#       all_pseudosets.csv
+#       deviance_params_noday41positives.csv
+
+
+############################################################################
+
 #Requires all_pseudosets.csv, deviance_params_noday41positives.csv
 library(dplyr)
 
-ps <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/Hawley et al 2024 Datasets/all_pseudosets.csv")
-dp <- read.csv("/Users/jesse/Documents/GitHub/EEID_1A_Mechanistic_Link/Reinfection_Augments_Heterogeneity/Public/Final Dataframes/Hawley et al 2024 Datasets/deviance_params_noday41positives.csv")
+ps <- read.csv("all_pseudosets.csv")
+dp <- read.csv("deviance_params_noday41positives.csv")
 
 ps$shape <- ps$par1.gamma
 ps$scale <- ps$par2.gamma
